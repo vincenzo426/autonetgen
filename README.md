@@ -12,7 +12,7 @@ Genera poi configurazioni Terraform per implementare l'infrastruttura inferita s
 
 L'architettura del progetto segue un design modulare basato sul seguente diagramma delle classi:
 
-![Diagramma delle Classi](diagram.png)
+![Diagramma delle Classi](autonet_gen_diagramma.png)
 
 Il diagramma mostra la seguente struttura:
 
