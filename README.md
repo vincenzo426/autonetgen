@@ -73,8 +73,8 @@ network_analyzer/
 
 ```bash
 # Clona il repository
-git clone https://github.com/tuorepositorio/network-analyzer.git
-cd network-analyzer
+git clone https://github.com/vincenzo426/autonetgen
+cd autonetgen
 
 # Installa le dipendenze
 pip install -r requirements.txt
