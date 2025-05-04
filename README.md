@@ -1,158 +1,126 @@
-# AutoNetGen
+# AutonetGen
 
-**Generatore automatico di configurazioni di rete basato su analisi del traffico**
+Questo progetto analizza dataset di traffico di rete (PCAP, CSV, NetFlow) per inferire:
+- Host IP e ruoli (client, server, PLC, ecc.)
+- Protocolli utilizzati
+- Servizi e mapping delle porte
+- Pattern di comunicazione
 
-## Descrizione
+Genera poi configurazioni Terraform per implementare l'infrastruttura inferita su GCP.
 
-**AutoNetGen** è uno strumento che analizza il traffico di rete catturato in file PCAP e inferisce automaticamente la topologia della rete, per poi generare configurazioni di infrastruttura come codice (IaC) utilizzando Terraform per Google Cloud Platform (GCP).
+## Architettura del Progetto
 
-## Caratteristiche
+L'architettura del progetto segue un design modulare basato sul seguente diagramma delle classi:
 
-- Analisi di file PCAP per estrazione dei flussi di traffico di rete
-- Identificazione automatica di client, server e servizi
-- Creazione di un grafo della topologia di rete
-- Generazione automatica di configurazione Terraform per GCP
-- Supporto per il deployment automatico dell'infrastruttura
-- Validazione della rete creata
+![Diagramma delle Classi](diagram.png)
 
-## Requisiti
+Il diagramma mostra la seguente struttura:
 
-- Python 3.8+
-- Terraform 1.0+
-- Account Google Cloud Platform con accesso API
-- Google Cloud SDK (opzionale, per test e validazione)
+- **AnalysisOrchestrator**: Classe principale che coordina l'intero processo
+  - Utilizza NetworkAnalyzer per l'analisi
+  - Utilizza NetworkEnricher per l'arricchimento dei dati
+  - Gestisce i generatori di output
 
-### Dipendenze Python
+- **NetworkAnalyzer**: Classe per l'analisi del traffico di rete
+  - Contiene informazioni su host, connessioni, ruoli, servizi
+  - Utilizza parser specializzati per diversi formati di file
+  - Costruisce un grafo della rete
 
-- `scapy`
-- `pandas`
-- `networkx`
-- `jinja2`
+- **NetworkEnricher**: Classe per l'arricchimento dei dati con informazioni aggiuntive
+  - Inferisce ruoli degli host
+  - Identifica subnet
+
+- **Parser**: Gerarchia di classi per l'analisi di diversi formati
+  - NetworkParser (Classe base)
+    - PCAPParser
+    - CSVParser
+    - NetFlowParser
+
+- **Generatori di Output**: Gerarchia di classi per la generazione di output
+  - OutputGenerator (Coordinatore)
+    - GraphvizGenerator (Visualizzazione)
+    - TerraformGenerator (Infrastruttura)
+    - JSONExporter (Analisi)
+
+## Struttura del Progetto
+
+La struttura del progetto segue un design modulare:
+
+```
+network_analyzer/
+├── main.py                      # Punto di ingresso principale
+├── analysis_orchestrator.py     # Coordinatore dell'analisi
+├── network_analyzer.py          # Classe principale per l'analisi
+├── network_data.py              # Struttura dati per i dati di rete
+├── network_enricher.py          # Arricchimento dei dati
+├── output_generator.py          # Coordinatore dei generatori di output
+├── config.py                    # Configurazioni e costanti
+├── parsers/                     # Moduli per l'analisi dei diversi formati
+│   ├── __init__.py
+│   ├── base_parser.py           # Classe base per i parser
+│   ├── pcap_parser.py           # Parser per file PCAP
+│   ├── csv_parser.py            # Parser per file CSV
+│   └── netflow_parser.py        # Parser per file NetFlow
+└── output_generators/           # Generatori di output
+    ├── __init__.py
+    ├── base_generator.py        # Classe base per i generatori
+    ├── graphviz_generator.py    # Generatore di grafi
+    ├── terraform_generator.py   # Generatore di configurazioni Terraform
+    └── json_exporter.py         # Esportatore JSON
+```
 
 ## Installazione
 
 ```bash
-# Installa le dipendenze
-pip install scapy pandas networkx jinja2
-
 # Clona il repository
-git clone https://github.com/tuouser/autonetgen.git
-cd autonetgen
+git clone https://github.com/tuorepositorio/network-analyzer.git
+cd network-analyzer
 
-# Installazione (per sviluppatori)
+# Installa le dipendenze
+pip install -r requirements.txt
+
+# Installa il pacchetto in modalità sviluppo
 pip install -e .
-```
-
-## Struttura del progetto
-
-```
-autonetgen/
-├── autonetgen/
-│   ├── __init__.py
-│   ├── core.py       # Classe principale AutoNetGen
-│   ├── cli.py        # Interfaccia a riga di comando
-│   └── templates/    # Templates Jinja2 per Terraform
-├── tests/            # Test unitari
-├── examples/         # Esempi di utilizzo
-├── setup.py          # Script di installazione
-└── README.md         # Questo file
 ```
 
 ## Utilizzo
 
-### Interfaccia a riga di comando
-
-AutoNetGen offre diversi comandi per fasi specifiche del processo o per l'esecuzione dell'intero pipeline.
-
-#### Analizzare un file PCAP
-
 ```bash
-autonetgen analyze --pcap path/to/capture.pcap
+# Analisi base
+python main.py path/to/traffic.pcap
+
+# Specificare il tipo di file
+python main.py path/to/traffic.csv --type csv
+
+# Personalizzare le directory di output
+python main.py path/to/traffic.pcap --output-dir my_output --output-terraform terraform_configs
 ```
 
-#### Generare la configurazione Terraform
+## Esempi
 
+### Analisi di un file PCAP
 ```bash
-autonetgen generate --pcap path/to/capture.pcap --output terraform_config
+python main.py samples/network_traffic.pcap
 ```
 
-#### Eseguire il deployment dell'infrastruttura
-
+### Analisi di un file CSV con formato personalizzato
 ```bash
-autonetgen deploy --config terraform_config
+python main.py samples/traffic_data.csv --type csv
 ```
 
-#### Distruggere l'infrastruttura
-
+### Generazione di output in posizioni specifiche
 ```bash
-autonetgen destroy --config terraform_config
+python main.py samples/traffic.pcap --output-graph network_diagram.pdf --output-analysis results.json --output-terraform terraform_configs
 ```
 
-#### Eseguire l'intero pipeline
+## Personalizzazione
 
-```bash
-autonetgen run-all --pcap path/to/capture.pcap --output terraform_config [--deploy]
-```
+È possibile estendere il progetto implementando nuovi parser o generatori di output:
 
-### Opzioni comuni
+1. Per aggiungere un nuovo parser, creare una nuova classe che estende `NetworkParser`
+2. Per aggiungere un nuovo generatore di output, creare una nuova classe che estende `OutputGenerator`
 
-- `--project, -j`: ID del progetto GCP
-- `--region, -r`: Regione GCP (default: `europe-west1`)
-- `--zone, -z`: Zona GCP (default: `europe-west1-b`)
-- `--verbose, -v`: Abilita log dettagliato
-- `--auto-approve, -y`: Approva automaticamente le operazioni (per deploy e destroy)
+## Requisiti
 
-### Esempio di utilizzo programmativo
-
-```python
-from autonetgen.core import AutoNetGen
-
-# Configura AutoNetGen
-config = {
-    'terraform_dir': 'output_terraform',
-    'gcp': {
-        'project': 'mio-progetto-gcp',
-        'region': 'europe-west1',
-        'zone': 'europe-west1-b'
-    }
-}
-
-# Inizializza
-auto_net_gen = AutoNetGen(config)
-
-# Esegui il pipeline
-auto_net_gen.run_pipeline('mia_cattura.pcap', auto_deploy=False)
-
-# Opzionale: esegui il deployment
-auto_net_gen.deploy_infrastructure()
-```
-
-## Pipeline di elaborazione
-
-1. **Analisi del traffico**: Il file PCAP viene analizzato per estrarre informazioni sui flussi di rete.
-2. **Inferenza della topologia**: Viene creato un grafo della rete e inferiti i ruoli dei nodi (client, server).
-3. **Generazione della configurazione**: Vengono creati file Terraform basati sulla topologia inferita.
-4. **Deployment (opzionale)**: Viene eseguito il deployment dell'infrastruttura su GCP utilizzando Terraform.
-5. **Validazione (opzionale)**: Vengono eseguiti test per verificare che la rete creata funzioni correttamente.
-
-## Limitazioni attuali
-
-- L'inferenza dei ruoli è basata su euristiche semplici
-- Supporto solo per Google Cloud Platform
-- La validazione automatica della rete richiede ulteriore sviluppo
-- L'analisi di file PCAP molto grandi può richiedere molta memoria
-
-## Roadmap
-
-- Supporto per altri provider cloud (AWS, Azure)
-- Miglioramento degli algoritmi di inferenza
-- Interfaccia utente grafica (GUI)
-- Validazione automatica delle reti create
-- Supporto per protocolli industriali (Modbus, DNP3, ecc.)
-- Supporto per IPv6
-- Analisi incrementale e in tempo reale
-
-## Contribuire
-
-Le contribuzioni sono benvenute!  
-Per favore, apri un'**issue** o una **pull request**.
+- Python 3.6+
+- Pacchetti Python elencati in requirements.txt
