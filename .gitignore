@@ -1,0 +1,6 @@
+venv/
+.venv/
+our_infra/.DS_Store
+our_infra/functions/.DS_Store
+our_infra/modules/.DS_Store
+.DS_Store

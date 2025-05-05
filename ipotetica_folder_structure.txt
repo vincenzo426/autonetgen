@@ -1,0 +1,13 @@
+autonetgen-infra/
+├── main.tf                  # Entry point, richiama i moduli
+├── variables.tf             # Variabili globali
+├── outputs.tf               # Output condivisi
+├── terraform.tfvars         # Valori delle variabili
+├── modules/
+│   ├── storage/             # Bucket GCS per dataset e output
+│   ├── network/             # VPC, subnet, firewall
+│   ├── compute/             # VM GCE (template base)
+│   ├── cloud_run/           # Servizi containerizzati (analisi, terraform-gen, test)
+│   ├── cloud_build/         # Job Terraform provisioning
+│   ├── monitoring/          # Logging, monitoring
+│   └── iam/                 # IAM roles, service accounts
