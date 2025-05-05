@@ -40,25 +40,19 @@ export default function NetworkAnalyzerDashboard() {
   };
 
 
-const startAnalysis = async () => {
-  const response = await fetch('http://localhost:5000/api/analyze', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      input_file: uploadedFiles,  // adapt this
-      type: 'pcap',
-      output_dir: 'output',
-      output_graph: 'output/graph.png',
-      output_analysis: 'output/analysis.json',
-      output_terraform: 'output/terraform'
-    })
-  });
-
-  const result = await response.json();
-  console.log(result);
-};
+  const startAnalysis = async () => {
+    const formData = new FormData();
+    formData.append('file', uploadedFiles[0]);
+    formData.append('type', 'pcap'); // Optional: CSV, netflow, etc.
+  
+    const response = await fetch('http://localhost:8000/api/analyze', {
+      method: 'POST',
+      body: formData,
+    });
+  
+    const result = await response.json();
+    console.log(result);
+ };
 
 
   // Function to add notifications
