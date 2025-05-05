@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 
 // API URL per il backend
-const API_URL = "http://localhost:5000/api";
+const API_URL = "http://localhost:8000/api";
 
 // Main App Component
 export default function NetworkAnalyzerDashboard() {
@@ -101,7 +101,9 @@ export default function NetworkAnalyzerDashboard() {
       // In un'implementazione reale, dovresti inviare i file al server
       // Per questa simulazione, aspettiamo un po' e poi simuliamo un risultato
       
+      
       // Simula API call - in una implementazione reale, questa sarebbe una fetch all'API
+      /*
       setTimeout(() => {
         const mockResults = {
           status: 'success',
@@ -137,26 +139,32 @@ export default function NetworkAnalyzerDashboard() {
         // Passa automaticamente alla scheda dei risultati
         setActiveTab("results");
       }, 3000); // Simula 3 secondi di elaborazione
+      */
+     
       
-      /* 
-       * Implementazione reale dell'API call:
-       * 
-       * const response = await fetch(`${API_URL}/analyze`, {
-       *   method: 'POST',
-       *   body: formData
-       * });
-       * 
-       * if (!response.ok) {
-       *   const errorData = await response.json();
-       *   throw new Error(errorData.message || 'Analysis failed');
-       * }
-       * 
-       * const data = await response.json();
-       * setAnalysisResults(data);
-       * setIsAnalyzing(false);
-       * setActiveTab("results");
-       * addNotification("Analysis completed successfully", "success");
-       */
+       
+       const response = fetch(`${API_URL}/analyze`, {
+        method: 'POST',
+        body: formData
+      }).then(async response => {
+          console.log('Response:', response);
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Analysis failed');
+          }
+          return response.json();
+        })
+        .then(data => {
+          setAnalysisResults(data);
+          setIsAnalyzing(false);
+          setActiveTab("results");
+          addNotification("Analysis completed successfully", "success");
+        })
+        .catch(error => {
+          console.error('Error during fetch:', error);
+          setIsAnalyzing(false);
+          addNotification(error.message || "An unexpected error occurred", "error");
+        });
       
     } catch (err) {
       setIsAnalyzing(false);

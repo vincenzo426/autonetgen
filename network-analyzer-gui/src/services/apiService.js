@@ -1,6 +1,4 @@
-// src/services/apiService.js
-
-const API_URL = 'http://localhost:5000/api';
+const API_URL = 'http://localhost:8000/api';
 
 /**
  * Servizio per comunicare con il backend API
@@ -68,19 +66,23 @@ const apiService = {
    * Scarica un file dal server
    * @param {string} fileType - Tipo di file da scaricare (graph, analysis, terraform)
    * @param {string} filePath - Percorso del file sul server
-   * @returns {Promise<Blob>} Blob del file scaricato
+   * @returns {Promise<void>} Avvia il download del file
    */
   downloadFile: async (fileType, filePath) => {
     try {
       // Costruisci l'URL per il download
       const downloadUrl = `${API_URL}/download/${fileType}?path=${encodeURIComponent(filePath)}`;
       
-      // Effettua la richiesta
+      // Utilizza il metodo fetch in modalità 'no-cors' per ottenere il file
       const response = await fetch(downloadUrl);
       
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
+        // Se la risposta è un JSON di errore
+        if (response.headers.get('content-type')?.includes('application/json')) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
+        }
+        throw new Error(`HTTP error! Status: ${response.status}`);
       }
       
       // Ottieni il blob del file
@@ -88,18 +90,28 @@ const apiService = {
       
       // Determina il nome del file
       let fileName;
-      switch (fileType) {
-        case 'graph':
-          fileName = 'network_graph.pdf';
-          break;
-        case 'analysis':
-          fileName = 'network_analysis.json';
-          break;
-        case 'terraform':
-          fileName = 'terraform_config.zip';
-          break;
-        default:
-          fileName = 'download';
+      const contentDisposition = response.headers.get('content-disposition');
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+        if (filenameMatch && filenameMatch[1]) {
+          fileName = filenameMatch[1];
+        }
+      }
+      
+      if (!fileName) {
+        switch (fileType) {
+          case 'graph':
+            fileName = 'network_graph.pdf';
+            break;
+          case 'analysis':
+            fileName = 'network_analysis.json';
+            break;
+          case 'terraform':
+            fileName = 'terraform_config.zip';
+            break;
+          default:
+            fileName = 'download';
+        }
       }
       
       // Crea un URL per il download
@@ -116,8 +128,6 @@ const apiService = {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      
-      return fileBlob;
     } catch (error) {
       console.error(`Download failed for ${fileType}:`, error);
       throw error;

@@ -1,4 +1,3 @@
-// src/App.js
 import { useState, useEffect } from 'react';
 import './App.css';
 import FileUploader from './components/FileUploader';
@@ -51,13 +50,13 @@ function App() {
   const checkServerStatus = async () => {
     setIsCheckingServer(true);
     try {
-      // await apiService.checkServerStatus();
-      // Simula un ritardo per la connessione
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await apiService.checkServerStatus();
       setIsServerAvailable(true);
+      addNotification("Connected to backend server", "success");
     } catch (error) {
       setIsServerAvailable(false);
       addNotification("Backend server is not available. Some features might not work properly.", "error");
+      console.error("Server connection error:", error);
     } finally {
       setIsCheckingServer(false);
     }
@@ -82,57 +81,89 @@ function App() {
 
     try {
       if (isServerAvailable) {
-        // In una implementazione reale, questa sarebbe chiamata al backend
-        // const response = await apiService.analyzeFiles(uploadedFiles, {
-        //   type: selectedParser,
-        //   output_dir: outputPaths.output_dir,
-        //   output_graph: outputPaths.output_graph,
-        //   output_analysis: outputPaths.output_analysis,
-        //   output_terraform: outputPaths.output_terraform
-        // });
-        // setAnalysisResults(response.results);
-      }
-
-      // Simulazione dei risultati per dimostrazione
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      const mockResults = {
-        hosts: uploadedFiles.length * 5 + Math.floor(Math.random() * 10),
-        connections: uploadedFiles.length * 12 + Math.floor(Math.random() * 20),
-        protocols: ['TCP', 'UDP', 'HTTP', 'MODBUS', 'S7COMM'],
-        anomalies: Math.floor(Math.random() * 5),
-        subnets: ['192.168.1.0/24', '10.0.0.0/24'],
-        roles: {
-          'CLIENT': Math.floor(Math.random() * 10) + 5,
-          'SERVER': Math.floor(Math.random() * 5) + 2,
-          'PLC_MODBUS': Math.floor(Math.random() * 3) + 1,
-          'GATEWAY': Math.floor(Math.random() * 2) + 1
-        },
-        output_paths: {
-          graph: outputPaths.output_graph,
-          analysis: outputPaths.output_analysis,
-          terraform: outputPaths.output_terraform
+        // Se il server è disponibile, invia i file all'API
+        const response = await apiService.analyzeFiles(uploadedFiles, {
+          type: selectedParser,
+          output_dir: outputPaths.output_dir,
+          output_graph: outputPaths.output_graph,
+          output_analysis: outputPaths.output_analysis,
+          output_terraform: outputPaths.output_terraform
+        });
+        
+        if (response.status === 'success') {
+          setAnalysisResults(response.results);
+          addNotification("Analysis completed successfully", "success");
+          setActiveTab("results");
+        } else {
+          throw new Error(response.message || "Analysis failed");
         }
-      };
-      
-      setAnalysisResults(mockResults);
-      addNotification("Analysis completed successfully", "success");
-      setActiveTab("results");
+      } else {
+        // Se il server non è disponibile, simula l'analisi
+        await simulateAnalysis();
+      }
     } catch (error) {
       addNotification(`Analysis failed: ${error.message}`, "error");
+      console.error("Analysis error:", error);
     } finally {
       setIsAnalyzing(false);
     }
   };
 
+  // Simula un'analisi quando il server non è disponibile
+  const simulateAnalysis = async () => {
+    // Simula un ritardo
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Genera risultati fittizi
+    const mockResults = {
+      hosts: uploadedFiles.length * 5 + Math.floor(Math.random() * 10),
+      hosts_list: Array.from({ length: uploadedFiles.length * 5 }, (_, i) => `192.168.1.${i + 1}`),
+      connections: uploadedFiles.length * 12 + Math.floor(Math.random() * 20),
+      protocols: [
+        { name: 'TCP', count: Math.floor(Math.random() * 100) + 50 },
+        { name: 'UDP', count: Math.floor(Math.random() * 50) + 10 },
+        { name: 'HTTP', count: Math.floor(Math.random() * 40) + 5 },
+        { name: 'MODBUS', count: Math.floor(Math.random() * 20) + 1 },
+        { name: 'S7COMM', count: Math.floor(Math.random() * 10) + 1 }
+      ],
+      anomalies: Math.floor(Math.random() * 5),
+      subnets: ['192.168.1.0/24', '10.0.0.0/24'],
+      roles: {
+        'CLIENT': Math.floor(Math.random() * 10) + 5,
+        'SERVER': Math.floor(Math.random() * 5) + 2,
+        'PLC_MODBUS': Math.floor(Math.random() * 3) + 1,
+        'GATEWAY': Math.floor(Math.random() * 2) + 1
+      },
+      output_paths: {
+        graph: outputPaths.output_graph,
+        analysis: outputPaths.output_analysis,
+        terraform: outputPaths.output_terraform
+      }
+    };
+    
+    setAnalysisResults(mockResults);
+    addNotification("Analysis completed successfully (simulated)", "success");
+    setActiveTab("results");
+  };
+
   // Gestisce le esportazioni
-  const handleExport = (type) => {
+  const handleExport = async (type) => {
     addNotification(`Preparing ${type} export...`, "info");
     
-    // In una implementazione reale, questa chiamerebbe apiService.downloadFile
-    setTimeout(() => {
-      addNotification(`${type} exported successfully`, "success");
-    }, 1500);
+    try {
+      if (isServerAvailable && analysisResults && analysisResults.output_paths) {
+        // Se il server è disponibile, scarica il file
+        await apiService.downloadFile(type, analysisResults.output_paths[type]);
+        addNotification(`${type} exported successfully`, "success");
+      } else {
+        // Simula un'esportazione
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        addNotification(`${type} exported successfully (simulated)`, "success");
+      }
+    } catch (error) {
+      addNotification(`Export failed: ${error.message}`, "error");
+      console.error("Export error:", error);
+    }
   };
 
   // Aggiunge una notifica

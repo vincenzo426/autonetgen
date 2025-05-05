@@ -58,8 +58,8 @@ def analyze():
         result_data = {
             'hosts': set(),
             'connections': {},
-            'protocols': set(),
-            'subnets': set(),
+            'protocols': {},
+            'subnets': {},
             'roles': {}
         }
         
@@ -81,37 +81,63 @@ def analyze():
                     'message': f'Analisi fallita per il file {os.path.basename(file_path)}'
                 }), 500
             
-            # Aggrega i risultati
-            file_data = orchestrator.get_data()
-            result_data['hosts'].update(file_data.get('hosts', []))
+            # Aggrega i risultati dall'analizzatore interno all'orchestratore
+            analyzer_data = orchestrator.analyzer.get_data()
             
-            for proto, count in file_data.get('protocols', {}).items():
+            # Aggiungi host
+            result_data['hosts'].update(analyzer_data['network_data'].hosts)
+            
+            # Aggiungi protocolli
+            for proto, count in analyzer_data['network_data'].protocols.items():
                 if proto in result_data['protocols']:
                     result_data['protocols'][proto] += count
                 else:
                     result_data['protocols'][proto] = count
-                    
-            # Aggiungi altri dati dai risultati...
             
-        # Converti set in liste per il JSON
-        result_data['hosts'] = list(result_data['hosts'])
-        result_data['protocols'] = [p for p in result_data['protocols']]
-        result_data['subnets'] = list(result_data['subnets'])
+            # Aggiungi subnet
+            for ip, subnet in orchestrator.analyzer.subnets.items():
+                result_data['subnets'][ip] = subnet
+            
+            # Aggiungi ruoli degli host
+            for host, role in orchestrator.analyzer.host_roles.items():
+                result_data['roles'][host] = role
+            
+            # Aggiungi connessioni
+            for (src, dst), count in analyzer_data['network_data'].connections.items():
+                conn_key = f"{src}->{dst}"
+                if conn_key in result_data['connections']:
+                    result_data['connections'][conn_key] += count
+                else:
+                    result_data['connections'][conn_key] = count
         
-        # Aggiungi i percorsi di output
-        result_data['output_paths'] = {
-            'graph': output_graph,
-            'analysis': output_analysis,
-            'terraform': output_terraform
+        # Prepara il risultato finale
+        final_result = {
+            'hosts': len(result_data['hosts']),
+            'hosts_list': list(result_data['hosts']),
+            'connections': sum(result_data['connections'].values()),
+            'connections_details': result_data['connections'],
+            'protocols': [{'name': proto, 'count': count} for proto, count in result_data['protocols'].items()],
+            'subnets': list(set(result_data['subnets'].values())),
+            'roles': {},
+            'anomalies': 0,  # Questo richiede un'implementazione per rilevare anomalie
+            'output_paths': {
+                'graph': output_graph,
+                'analysis': output_analysis,
+                'terraform': output_terraform
+            }
         }
         
-        # Conta il numero di connessioni
-        result_data['connections_count'] = sum(result_data['connections'].values())
+        # Conta i ruoli
+        for host, role in result_data['roles'].items():
+            if role in final_result['roles']:
+                final_result['roles'][role] += 1
+            else:
+                final_result['roles'][role] = 1
         
         return jsonify({
             'status': 'success',
             'message': 'Analisi completata',
-            'results': result_data
+            'results': final_result
         })
             
     except Exception as e:
@@ -168,4 +194,4 @@ def health_check():
 
 if __name__ == '__main__':
     # In produzione, utilizzare un server WSGI come Gunicorn
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=8000)

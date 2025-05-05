@@ -1,4 +1,3 @@
-// src/components/ResultsVisualizer.js
 import { useState } from 'react';
 import { 
   Network, 
@@ -14,19 +13,12 @@ import {
 const ProtocolChart = ({ protocols }) => {
   if (!protocols || protocols.length === 0) return null;
   
-  // Genera percentuali casuali per la dimostrazione
-  const protocolData = protocols.map(protocol => {
-    return {
-      name: protocol,
-      value: Math.floor(Math.random() * 50) + 10, // 10-60%
-    };
-  });
-  
   // Normalizza le percentuali in modo che la somma sia 100%
-  const total = protocolData.reduce((sum, item) => sum + item.value, 0);
-  protocolData.forEach(item => {
-    item.percentage = Math.round((item.value / total) * 100);
-  });
+  const total = protocols.reduce((sum, item) => sum + item.count, 0);
+  const protocolData = protocols.map(protocol => ({
+    ...protocol,
+    percentage: Math.round((protocol.count / total) * 100)
+  }));
   
   return (
     <div className="w-full">
@@ -129,7 +121,7 @@ const RoleDistribution = ({ roles }) => {
               const endX = 50 + 50 * Math.cos(Math.PI * endAngle / 180);
               const endY = 50 + 50 * Math.sin(Math.PI * endAngle / 180);
               
-              // Determina se l'arco è maggiore di 180 gradi
+              // Determina se l'arco Ã¨ maggiore di 180 gradi
               const largeArcFlag = endAngle - startAngle > 180 ? 1 : 0;
               
               // Path per il segmento
@@ -206,7 +198,7 @@ const NetworkMap = ({ onViewFullMap }) => {
       <Network size={64} className="text-gray-400 mb-4" />
       <p className="text-gray-500 mb-4 text-center">Network visualization preview</p>
       <button 
-        className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
+        className="mt-4 bg-blue-600 text-white py-1 px-4 rounded text-sm hover:bg-blue-700"
         onClick={onViewFullMap}
       >
         View Full Network Map
@@ -226,6 +218,21 @@ const ResultsVisualizer = ({ results, onExportClick }) => {
       </div>
     );
   }
+  
+  // Preprocess del formato dei dati in arrivo
+  const processedResults = {
+    hosts: results.hosts || 0,
+    hosts_list: results.hosts_list || [],
+    connections: results.connections || 0,
+    protocols: Array.isArray(results.protocols) ? results.protocols : 
+               (typeof results.protocols === 'object' ? 
+                Object.entries(results.protocols).map(([name, count]) => ({ name, count })) : 
+                []),
+    anomalies: results.anomalies || 0,
+    subnets: Array.isArray(results.subnets) ? results.subnets : [],
+    roles: results.roles || {},
+    output_paths: results.output_paths || {}
+  };
   
   return (
     <div className="bg-white rounded-lg shadow-md overflow-hidden">
@@ -286,21 +293,21 @@ const ResultsVisualizer = ({ results, onExportClick }) => {
                   <h3 className="font-medium text-blue-900">Hosts</h3>
                   <Server size={24} className="text-blue-600" />
                 </div>
-                <p className="text-3xl font-bold text-blue-900">{results.hosts}</p>
+                <p className="text-3xl font-bold text-blue-900">{processedResults.hosts}</p>
               </div>
               <div className="bg-green-50 p-6 rounded-lg border border-green-100">
                 <div className="flex justify-between items-center mb-2">
                   <h3 className="font-medium text-green-900">Connections</h3>
                   <Activity size={24} className="text-green-600" />
                 </div>
-                <p className="text-3xl font-bold text-green-900">{results.connections}</p>
+                <p className="text-3xl font-bold text-green-900">{processedResults.connections}</p>
               </div>
               <div className="bg-amber-50 p-6 rounded-lg border border-amber-100">
                 <div className="flex justify-between items-center mb-2">
                   <h3 className="font-medium text-amber-900">Anomalies</h3>
                   <AlertCircle size={24} className="text-amber-600" />
                 </div>
-                <p className="text-3xl font-bold text-amber-900">{results.anomalies || 0}</p>
+                <p className="text-3xl font-bold text-amber-900">{processedResults.anomalies || 0}</p>
               </div>
             </div>
             
@@ -318,7 +325,7 @@ const ResultsVisualizer = ({ results, onExportClick }) => {
                   <BarChart size={20} className="text-gray-500 mr-2" />
                   Protocol Distribution
                 </h3>
-                <ProtocolChart protocols={results.protocols} />
+                <ProtocolChart protocols={processedResults.protocols} />
               </div>
             </div>
             
@@ -341,7 +348,7 @@ const ResultsVisualizer = ({ results, onExportClick }) => {
               <PieChart size={20} className="text-gray-500 mr-2" />
               Host Roles Distribution
             </h3>
-            <RoleDistribution roles={results.roles} />
+            <RoleDistribution roles={processedResults.roles} />
           </div>
         )}
         
@@ -352,7 +359,7 @@ const ResultsVisualizer = ({ results, onExportClick }) => {
               <Globe size={20} className="text-gray-500 mr-2" />
               Subnet Information
             </h3>
-            <SubnetList subnets={results.subnets} />
+            <SubnetList subnets={processedResults.subnets} />
           </div>
         )}
         
@@ -363,7 +370,7 @@ const ResultsVisualizer = ({ results, onExportClick }) => {
               <BarChart size={20} className="text-gray-500 mr-2" />
               Protocol Distribution
             </h3>
-            <ProtocolChart protocols={results.protocols} />
+            <ProtocolChart protocols={processedResults.protocols} />
           </div>
         )}
       </div>
