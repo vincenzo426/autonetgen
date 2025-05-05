@@ -47,7 +47,7 @@ const startAnalysis = async () => {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      input_file: '/path/to/your/file.pcap',  // adapt this
+      input_file: uploadedFiles,  // adapt this
       type: 'pcap',
       output_dir: 'output',
       output_graph: 'output/graph.png',
