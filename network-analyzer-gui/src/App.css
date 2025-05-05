@@ -1,0 +1,48 @@
+/* src/App.css */
+/* Reset default styles that might conflict with Tailwind */
+.App {
+  text-align: left;
+  height: 100vh;
+  width: 100vw;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Remove default padding/margin from create-react-app */
+body, html {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Make sure the app takes full height and width */
+#root {
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Override any default styles from create-react-app */
+.App-logo, .App-header {
+  display: none;
+}
+
+/* Add any custom styling that's not easily handled by Tailwind here */
+/* For example, scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
