@@ -5,7 +5,7 @@ Network Analyzer è un'applicazione React che si integra con un backend Python p
 
 L'interfaccia è progettata con un'architettura modulare che permette un'elevata riutilizzabilità dei componenti e una facile manutenzione.
 
-![Network Analyzer Dashboard](screenshots/dashboard.png)
+![Network Analyzer Dashboard](dashboard.png)
 
 ## 🚀 Funzionalità
 
