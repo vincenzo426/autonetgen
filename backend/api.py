@@ -95,7 +95,9 @@ def analyze():
                     result_data['protocols'][proto] = count
             
             # Aggiungi subnet
+            logger.info(f"items: {orchestrator.analyzer.subnets}")
             for ip, subnet in orchestrator.analyzer.subnets.items():
+                logger.info(f"Subnet per {ip}: {subnet}")
                 result_data['subnets'][ip] = subnet
             
             # Aggiungi ruoli degli host

@@ -46,9 +46,11 @@ class AnalysisOrchestrator:
         os.makedirs(output_dir, exist_ok=True)
         
         # Determina automaticamente il tipo di file se non specificato
-        if file_type is None:
+        logger.info("File di input: %s", file_type)
+        if file_type is None or file_type == 'auto':
             file_ext = os.path.splitext(input_file)[1].lower()
             if file_ext == '.pcap' or file_ext == '.pcapng':
+                logger.info("File di input di tipo PCAP")
                 file_type = 'pcap'
             elif file_ext == '.csv':
                 file_type = 'csv'
@@ -63,10 +65,13 @@ class AnalysisOrchestrator:
         # Analizza il file di input
         success = False
         if file_type == 'pcap':
+            logger.info("Analisi del file PCAP in corso...")
             success = self.analyzer.analyze_pcap_file(input_file)
         elif file_type == 'csv':
+            logger.info("Analisi del file CSV in corso...")
             success = self.analyzer.analyze_csv_file(input_file)
         elif file_type == 'netflow':
+            logger.info("Analisi del file NetFlow in corso...")
             success = self.analyzer.analyze_netflow_file(input_file)
         
         if not success:

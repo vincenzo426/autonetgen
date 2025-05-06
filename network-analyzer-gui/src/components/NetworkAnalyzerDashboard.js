@@ -110,6 +110,7 @@ export default function NetworkAnalyzerDashboard() {
         
         if (response.status === 'success') {
           setAnalysisResults(response.results);
+          console.log("Analysis results:", response.results);
           addNotification("Analysis completed successfully", "success");
           setActiveTab("results");
         } else {
@@ -117,7 +118,7 @@ export default function NetworkAnalyzerDashboard() {
         }
       } else {
         // Se il server non è disponibile, simula l'analisi
-        await simulateAnalysis();
+        throw new Error("Simulated analysis due to server unavailability");
       }
     } catch (error) {
       addNotification(`Analysis failed: ${error.message}`, "error");
@@ -129,7 +130,7 @@ export default function NetworkAnalyzerDashboard() {
 
   /**
    * Simula un'analisi quando il server non è disponibile
-   */
+   *
   const simulateAnalysis = async () => {
     // Simula un ritardo per l'analisi
     await new Promise(resolve => setTimeout(resolve, 3000));
@@ -165,7 +166,7 @@ export default function NetworkAnalyzerDashboard() {
     addNotification("Analysis completed successfully (simulated)", "success");
     setActiveTab("results");
   };
-
+  */
   /**
    * Gestisce l'esportazione dei risultati
    * @param {string} type - Tipo di esportazione (graph, analysis, terraform)

@@ -28,6 +28,7 @@ const SubnetListView = ({ subnets }) => {
         </thead>
         <tbody className="divide-y divide-gray-200">
           {subnets.map((subnet, idx) => {
+            console.log(`Subnet: ${subnet}`);
             // Numero casuale di host per subnet per dimostrazione
             const hosts = Math.floor(Math.random() * 15) + 1;
             // Scegli un ruolo casuale
