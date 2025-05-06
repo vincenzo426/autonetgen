@@ -1,70 +1,130 @@
-# Getting Started with Create React App
+# Network Analyzer GUI
+## 📋 Panoramica
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Network Analyzer è un'applicazione React che si integra con un backend Python per analizzare file di traffico di rete (PCAP, CSV, NetFlow), visualizzare statistiche, relazioni e topologie di rete, e generare configurazioni Terraform per Google Cloud Platform.
 
-## Available Scripts
+L'interfaccia è progettata con un'architettura modulare che permette un'elevata riutilizzabilità dei componenti e una facile manutenzione.
 
-In the project directory, you can run:
+![Network Analyzer Dashboard](screenshots/dashboard.png)
 
-### `npm start`
+## 🚀 Funzionalità
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+- **Upload di file** con supporto drag-and-drop (PCAP, CSV, NetFlow)
+- **Configurazione dell'analisi** con diverse opzioni di parser
+- **Visualizzazione interattiva** dei risultati dell'analisi:
+  - Mappa della rete
+  - Distribuzione dei protocolli
+  - Ruoli degli host
+  - Informazioni sulle subnet
+- **Esportazione dei risultati** in vari formati:
+  - Visualizzazioni Graphviz
+  - Configurazioni Terraform per GCP
+  - Analisi JSON
+- **Integrazione con Google Cloud** per l'archiviazione dei risultati
+- **Sistema di notifiche** per feedback in tempo reale
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## 🛠️ Tecnologie utilizzate
 
-### `npm test`
+- **React**: Framework frontend
+- **Tailwind CSS**: Styling dei componenti
+- **Lucide React**: Icone moderne
+- **SVG**: Visualizzazioni personalizzate (grafici a torta, ecc.)
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## 📦 Struttura del progetto
 
-### `npm run build`
+L'applicazione è organizzata in componenti modulari per una migliore manutenibilità e riutilizzabilità:
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+```
+src/
+├── App.js                         # Entry point semplificato
+├── App.css                        # Stili globali
+├── index.js                       # Punto di ingresso React
+├── services/
+│   └── apiService.js              # Gestione delle chiamate API
+└── components/
+    ├── NetworkAnalyzerDashboard.js  # Controller principale
+    ├── common/                      # Componenti riutilizzabili
+    │   ├── FileUploader.js          # Upload di file con drag-and-drop
+    │   └── NotificationSystem.js    # Sistema di notifiche
+    ├── layout/                      # Componenti di layout
+    │   ├── Header.js                # Header dell'app con stato e controlli
+    │   └── Sidebar.js               # Barra laterale con navigazione
+    ├── tabs/                        # Schede dell'applicazione
+    │   ├── UploadTab.js             # Scheda upload file
+    │   ├── AnalyzeTab.js            # Scheda configurazione analisi
+    │   ├── ResultsTab.js            # Scheda risultati
+    │   └── ExportTab.js             # Scheda esportazione
+    ├── export/                      # Funzionalità di esportazione
+    │   └── ExportOptions.js         # Opzioni per l'esportazione
+    └── visualizations/              # Visualizzazioni dati
+        ├── ResultsVisualizer.js     # Visualizzatore principale
+        ├── NetworkMapView.js        # Mappa della rete
+        ├── ProtocolChartView.js     # Distribuzione protocolli
+        ├── RoleDistributionView.js  # Distribuzione ruoli host
+        └── SubnetListView.js        # Lista subnet
+```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## 🚦 Flusso dell'applicazione
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+1. **Upload**: L'utente carica i file di rete (PCAP, CSV, NetFlow)
+2. **Configurazione**: Configura le opzioni di analisi e i formati di output
+3. **Analisi**: Avvia l'analisi, che elabora i file tramite il backend Python
+4. **Visualizzazione**: Esplora i risultati con grafici e statistiche
+5. **Esportazione**: Esporta i risultati nei formati desiderati
 
-### `npm run eject`
+## 💻 Installazione e utilizzo
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+### Prerequisiti
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+- Node.js (v14 o superiore)
+- NPM o Yarn
+- Python 3.8+ (per il backend)
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+### Installazione
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+1. Clona il repository:
+   ```bash
+   git clone https://github.com/vincenzo426/autonetgen
+   cd network-analyzer-gui
+   ```
 
-## Learn More
+2. Installa le dipendenze:
+   ```bash
+   npm install
+   # oppure
+   yarn install
+   ```
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+3. Avvia l'applicazione in modalità sviluppo:
+   ```bash
+   npm start
+   # oppure
+   yarn start
+   ```
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+4. Apri [http://localhost:3000](http://localhost:3000) nel browser
 
-### Code Splitting
+### Connessione con il backend
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+L'applicazione si connette per default a un backend all'indirizzo `http://localhost:8000`. Per cambiare questa configurazione, modifica la variabile `API_URL` in `src/services/apiService.js`.
 
-### Analyzing the Bundle Size
+```javascript
+// src/services/apiService.js
+const API_URL = 'http://localhost:8000/api';
+```
+## 🌐 Integrazione con il backend
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+L'applicazione comunica con il backend tramite l'API RESTful definita in `apiService.js`. I principali metodi disponibili sono:
 
-### Making a Progressive Web App
+- `checkServerStatus()`: Verifica la disponibilità del server
+- `analyzeFiles(files, options)`: Invia i file per l'analisi
+- `downloadFile(type, filePath)`: Scarica i file generati
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+## 🔒 Gestione degli errori
 
-### Advanced Configuration
+L'applicazione include un sistema di notifiche per informare l'utente su:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+- Errori di connessione al server
+- Problemi durante l'analisi
+- Errori di esportazione
+- Operazioni completate con successo
