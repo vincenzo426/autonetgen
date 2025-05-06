@@ -7,6 +7,7 @@ import UploadTab from "./tabs/UploadTab";
 import AnalyzeTab from "./tabs/AnalyzeTab";
 import ResultsTab from "./tabs/ResultsTab";
 import ExportTab from "./tabs/ExportTab";
+import TerraformTab from "./tabs/TerraformTab";
 import apiService from "../services/apiService";
 
 /**
@@ -234,7 +235,7 @@ export default function NetworkAnalyzerDashboard() {
   const isTabDisabled = (tabName) => {
     if (tabName === "upload") return false;
     if (tabName === "analyze") return uploadedFiles.length === 0;
-    if (tabName === "results" || tabName === "export") return !analysisResults;
+    if (["results", "export", "terraform"].includes(tabName)) return !analysisResults;
     return false;
   };
 
@@ -281,6 +282,14 @@ export default function NetworkAnalyzerDashboard() {
           />
         );
         
+      case "terraform":
+        return (
+          <TerraformTab 
+            results={analysisResults}
+            onNotify={addNotification}
+          />
+        );
+        
       default:
         return null;
     }
@@ -305,6 +314,8 @@ export default function NetworkAnalyzerDashboard() {
           isTabDisabled={isTabDisabled}
           isServerAvailable={isServerAvailable}
           isConnectedToCloud={isConnectedToCloud}
+          // Aggiungi la nuova tab Terraform alla navigazione
+          additionalTabs={[{ id: "terraform", name: "Terraform", icon: "Server" }]}
         />
 
         {/* Area contenuto */}

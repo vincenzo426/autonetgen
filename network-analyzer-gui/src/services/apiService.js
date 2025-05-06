@@ -1,3 +1,5 @@
+// src/services/apiService.js
+
 const API_URL = 'http://localhost:8000/api';
 
 /**
@@ -130,6 +132,82 @@ const apiService = {
       document.body.removeChild(a);
     } catch (error) {
       console.error(`Download failed for ${fileType}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Recupera la lista dei file Terraform generati
+   * @param {string} terraformPath - Percorso della directory Terraform
+   * @returns {Promise<Object>} Lista dei file Terraform
+   */
+  getTerraformFiles: async (terraformPath) => {
+    try {
+      const response = await fetch(`${API_URL}/terraform/files?path=${encodeURIComponent(terraformPath)}`);
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error('Failed to get Terraform files:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Recupera il contenuto di un file Terraform
+   * @param {string} terraformPath - Percorso della directory Terraform
+   * @param {string} fileName - Nome del file
+   * @returns {Promise<Object>} Contenuto del file
+   */
+  getTerraformFileContent: async (terraformPath, fileName) => {
+    try {
+      const encodedPath = encodeURIComponent(`${terraformPath}/${fileName}`);
+      const response = await fetch(`${API_URL}/terraform/content?path=${encodedPath}`);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error(`Failed to get content for file ${fileName}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Salva le modifiche a un file Terraform
+   * @param {string} terraformPath - Percorso della directory Terraform
+   * @param {string} fileName - Nome del file
+   * @param {string} content - Nuovo contenuto del file
+   * @returns {Promise<Object>} Risultato dell'operazione
+   */
+  saveTerraformFile: async (terraformPath, fileName, content) => {
+    try {
+      const response = await fetch(`${API_URL}/terraform/save`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          path: `${terraformPath}/${fileName}`,
+          content: content
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error(`Failed to save file ${fileName}:`, error);
       throw error;
     }
   }

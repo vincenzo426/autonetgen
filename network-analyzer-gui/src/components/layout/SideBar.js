@@ -1,5 +1,5 @@
 // src/components/layout/Sidebar.js
-import { Upload, Play, Activity, Download } from "lucide-react";
+import { Upload, Play, Activity, Download, Server, Code, Database } from "lucide-react";
 
 /**
  * Componente per la barra laterale dell'applicazione
@@ -10,16 +10,18 @@ import { Upload, Play, Activity, Download } from "lucide-react";
  * @param {Function} props.isTabDisabled - Funzione che verifica se una tab dovrebbe essere disabilitata
  * @param {boolean} props.isServerAvailable - Indica se il server è disponibile
  * @param {boolean} props.isConnectedToCloud - Indica se è attiva la connessione al cloud
+ * @param {Array} props.additionalTabs - Tab aggiuntive da visualizzare
  */
 const Sidebar = ({
   activeTab,
   onTabChange,
   isTabDisabled,
   isServerAvailable,
-  isConnectedToCloud
+  isConnectedToCloud,
+  additionalTabs = []
 }) => {
-  // Definizione delle tabs dell'applicazione
-  const tabs = [
+  // Definizione delle tabs di base dell'applicazione
+  const baseTabs = [
     { 
       id: "upload", 
       name: "Upload Data", 
@@ -41,12 +43,31 @@ const Sidebar = ({
       icon: Download 
     }
   ];
+  
+  // Funzione di supporto per ottenere il componente icona
+  const getIconComponent = (iconName) => {
+    switch (iconName) {
+      case "Server": return Server;
+      case "Code": return Code;
+      case "Database": return Database;
+      default: return null;
+    }
+  };
+  
+  // Prepara le tab aggiuntive con i componenti icona corretti
+  const processedAdditionalTabs = additionalTabs.map(tab => ({
+    ...tab,
+    icon: typeof tab.icon === 'string' ? getIconComponent(tab.icon) : tab.icon
+  }));
+  
+  // Combina le tab di base con quelle aggiuntive
+  const allTabs = [...baseTabs, ...processedAdditionalTabs];
 
   return (
     <nav className="w-64 bg-gray-800 text-white">
       <div className="p-4">
         {/* Tabs di navigazione */}
-        {tabs.map(tab => (
+        {allTabs.map(tab => (
           <TabButton
             key={tab.id}
             id={tab.id}
@@ -81,7 +102,7 @@ const TabButton = ({ id, name, Icon, isActive, isDisabled, onClick }) => {
       disabled={isDisabled}
       style={{ opacity: isDisabled ? 0.5 : 1 }}
     >
-      <Icon size={20} className="mr-3" />
+      {Icon && <Icon size={20} className="mr-3" />}
       {name}
     </button>
   );

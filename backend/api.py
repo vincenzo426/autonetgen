@@ -200,6 +200,99 @@ def download_file(file_type):
         logger.error(f"Errore durante il download del file: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/api/terraform/files', methods=['GET'])
+def get_terraform_files():
+    """
+    Endpoint per ottenere la lista dei file Terraform
+    """
+    try:
+        # Ottieni il percorso della directory Terraform
+        terraform_dir = request.args.get('path', os.path.join(DEFAULT_OUTPUT_DIR, 'terraform'))
+        
+        if not os.path.exists(terraform_dir):
+            return jsonify({'status': 'error', 'message': 'Directory Terraform non trovata'}), 404
+        
+        # Ottieni la lista dei file nella directory
+        files = []
+        for file_name in os.listdir(terraform_dir):
+            file_path = os.path.join(terraform_dir, file_name)
+            if os.path.isfile(file_path) and file_name.endswith('.tf'):
+                # Determina il tipo di file in base al contenuto o al nome
+                file_type = determine_terraform_file_type(file_name, file_path)
+                
+                files.append({
+                    'id': len(files) + 1,
+                    'name': file_name,
+                    'type': file_type,
+                    'size': os.path.getsize(file_path)
+                })
+        
+        return jsonify({
+            'status': 'success',
+            'path': terraform_dir,
+            'files': files
+        })
+    
+    except Exception as e:
+        logger.error(f"Errore durante il recupero dei file Terraform: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/terraform/content', methods=['GET'])
+def get_terraform_file_content():
+    """
+    Endpoint per ottenere il contenuto di un file Terraform
+    """
+    try:
+        # Ottieni il percorso del file
+        file_path = request.args.get('path')
+        
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({'status': 'error', 'message': 'File non trovato'}), 404
+        
+        # Leggi il contenuto del file
+        with open(file_path, 'r') as file:
+            content = file.read()
+        
+        return jsonify({
+            'status': 'success',
+            'content': content
+        })
+    
+    except Exception as e:
+        logger.error(f"Errore durante il recupero del contenuto del file: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/terraform/save', methods=['POST'])
+def save_terraform_file():
+    """
+    Endpoint per salvare le modifiche a un file Terraform
+    """
+    try:
+        # Ottieni i dati dalla richiesta
+        data = request.json
+        file_path = data.get('path')
+        content = data.get('content')
+        
+        if not file_path or not content:
+            return jsonify({'status': 'error', 'message': 'Percorso del file o contenuto mancante'}), 400
+        
+        # Verifica che il file esista
+        if not os.path.exists(file_path):
+            return jsonify({'status': 'error', 'message': 'File non trovato'}), 404
+        
+        # Salva il contenuto nel file
+        with open(file_path, 'w') as file:
+            file.write(content)
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'File salvato con successo'
+        })
+    
+    except Exception as e:
+        logger.error(f"Errore durante il salvataggio del file: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """
@@ -207,6 +300,53 @@ def health_check():
     """
     return jsonify({'status': 'ok', 'message': 'Servizio attivo'})
 
+def determine_terraform_file_type(file_name, file_path):
+    """
+    Determina il tipo di file Terraform in base al nome e al contenuto
+    
+    Args:
+        file_name (str): Nome del file
+        file_path (str): Percorso completo del file
+        
+    Returns:
+        str: Tipo di file (network, compute, variables, output, configuration)
+    """
+    # Controlla prima il nome del file
+    if file_name.startswith('provider') or file_name == 'main.tf':
+        return 'configuration'
+    elif file_name.startswith('network') or 'network' in file_name:
+        return 'network'
+    elif file_name.startswith('instance') or 'compute' in file_name:
+        return 'compute'
+    elif file_name.startswith('output') or 'output' in file_name:
+        return 'output'
+    elif file_name.startswith('variable') or 'var' in file_name:
+        return 'variables'
+    
+    # Se non è possibile determinare il tipo dal nome, verifica il contenuto
+    try:
+        with open(file_path, 'r') as file:
+            content = file.read().lower()
+            
+            if 'provider "google"' in content or 'terraform {' in content:
+                return 'configuration'
+            elif 'google_compute_network' in content or 'google_compute_subnetwork' in content:
+                return 'network'
+            elif 'google_compute_instance' in content:
+                return 'compute'
+            elif 'output ' in content:
+                return 'output'
+            elif 'variable ' in content:
+                return 'variables'
+    except:
+        pass
+    
+    # Tipo predefinito se non è possibile determinarlo
+    return 'configuration'
+
 if __name__ == '__main__':
+    # Assicurati che la directory di output esista
+    os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
+    
     # In produzione, utilizzare un server WSGI come Gunicorn
     app.run(debug=True, host='0.0.0.0', port=8000)
