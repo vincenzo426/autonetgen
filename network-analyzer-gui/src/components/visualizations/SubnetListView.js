@@ -23,26 +23,25 @@ const SubnetListView = ({ subnets }) => {
           <tr className="bg-gray-50">
             <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subnet</th>
             <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hosts</th>
-            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Main Role</th>
+            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
-          {subnets.map((subnet, idx) => {
-            console.log(`Subnet: ${subnet}`);
-            // Numero casuale di host per subnet per dimostrazione
-            const hosts = Math.floor(Math.random() * 15) + 1;
-            // Scegli un ruolo casuale
-            const roles = ['CLIENT', 'SERVER', 'PLC_MODBUS', 'GATEWAY', 'UNKNOWN'];
-            const mainRole = roles[Math.floor(Math.random() * roles.length)];
-            
-            return (
-              <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                <td className="px-3 py-3 whitespace-nowrap">{subnet}</td>
-                <td className="px-3 py-3 whitespace-nowrap">{hosts}</td>
-                <td className="px-3 py-3 whitespace-nowrap">{mainRole}</td>
-              </tr>
-            );
-          })}
+        {subnets.map((entry, idx) => {
+          const [subnetPart, hostsPart, rolePart] = entry.split(" | ");
+
+          const subnet = subnetPart.trim();
+          const hosts = hostsPart.replace("Hosts in subnet: ", "").trim();
+          const role = rolePart.replace("Roles: ", "").trim();
+
+          return (
+            <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+              <td className="px-3 py-3 whitespace-nowrap">{subnet}</td>
+              <td className="px-3 py-3 whitespace-nowrap">{hosts}</td>
+              <td className="px-3 py-3 whitespace-nowrap">{role}</td>
+            </tr>
+          );
+        })}
         </tbody>
       </table>
     </div>

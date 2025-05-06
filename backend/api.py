@@ -10,7 +10,7 @@ import tempfile
 import shutil
 import json
 from werkzeug.utils import secure_filename
-
+from collections import Counter
 from analysis_orchestrator import AnalysisOrchestrator
 from config import logger, DEFAULT_OUTPUT_DIR
 
@@ -94,11 +94,24 @@ def analyze():
                 else:
                     result_data['protocols'][proto] = count
             
-            # Aggiungi subnet
-            logger.info(f"items: {orchestrator.analyzer.subnets}")
+            # Aggiungi subnet con conteggio host e ruolo
+            logger.info(f"items: {analyzer_data}")
+            subnet_roles_summary = {}
+
+            # Group roles by subnet
             for ip, subnet in orchestrator.analyzer.subnets.items():
-                logger.info(f"Subnet per {ip}: {subnet}")
-                result_data['subnets'][ip] = subnet
+                role = orchestrator.analyzer.host_roles.get(ip, "UNKNOWN")
+                subnet_roles_summary.setdefault(subnet, {'hosts': [], 'roles': set()})
+                subnet_roles_summary[subnet]['hosts'].append(ip)
+                subnet_roles_summary[subnet]['roles'].add(role)
+
+            # Build final subnet entries
+            for subnet, data in subnet_roles_summary.items():
+                host_count = len(data['hosts'])
+                roles_str = ", ".join(sorted(data['roles']))
+                result_data['subnets'][subnet] = f"{subnet} | Hosts in subnet: {host_count} | Roles: {roles_str}"
+
+
             
             # Aggiungi ruoli degli host
             for host, role in orchestrator.analyzer.host_roles.items():
@@ -119,7 +132,7 @@ def analyze():
             'connections': sum(result_data['connections'].values()),
             'connections_details': result_data['connections'],
             'protocols': [{'name': proto, 'count': count} for proto, count in result_data['protocols'].items()],
-            'subnets': list(set(result_data['subnets'].values())),
+            'subnets': list(result_data['subnets'].values()),
             'roles': {},
             'anomalies': 0,  # Questo richiede un'implementazione per rilevare anomalie
             'output_paths': {
