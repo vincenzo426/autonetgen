@@ -74,10 +74,10 @@ const ExportOptions = ({ results, onNotify }) => {
     
     try {
       // Per una implementazione reale, utilizzare il apiService
-      // await apiService.downloadFile(type, results.output_paths[type]);
+      await apiService.downloadFile(type, results.output_paths[type]);
       
       // Simulazione di un ritardo per dimostrare il caricamento
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      //await new Promise(resolve => setTimeout(resolve, 1500));
       
       // Notifica il successo
       onNotify && onNotify({
