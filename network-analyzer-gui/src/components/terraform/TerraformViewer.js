@@ -66,10 +66,7 @@ const TerraformViewer = ({ terraformPath, onNotify }) => {
     } catch (error) {
       setError('Error fetching Terraform files. Please try again.');
       setIsLoading(false);
-      onNotify && onNotify({
-        message: `Error fetching Terraform files: ${error.message}`,
-        type: 'error'
-      });
+      onNotify && onNotify(`Error fetching Terraform files: ${error.message}`, 'error');
     }
   };
 
@@ -105,10 +102,7 @@ const TerraformViewer = ({ terraformPath, onNotify }) => {
     } catch (error) {
       setError(`Error loading file content for ${file.name}.`);
       setIsLoading(false);
-      onNotify && onNotify({
-        message: `Error loading file: ${error.message}`,
-        type: 'error'
-      });
+      onNotify && onNotify(`Error loading file: ${error.message}`, 'error');
     }finally {
         setIsFileContentLoading(false); // Aggiorna la nuova variabile
       }
@@ -288,15 +282,10 @@ variable "subnet_cidr" {
       
       setOriginalContent(fileContent);
       setIsEditing(false);
-      onNotify && onNotify({
-        message: `File ${selectedFile.name} saved successfully`,
-        type: 'success'
-      });
+      // Versione corretta: passa i parametri separati
+      onNotify && onNotify(`File ${selectedFile.name} saved successfully`, 'success');
     } catch (error) {
-      onNotify && onNotify({
-        message: `Error saving file: ${error.message}`,
-        type: 'error'
-      });
+      onNotify && onNotify(`Error saving file: ${error.message}`, 'error');
     } finally {
         setIsSaving(false);
       }
@@ -325,11 +314,7 @@ variable "subnet_cidr" {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    
-    onNotify && onNotify({
-      message: `File ${selectedFile.name} downloaded`,
-      type: 'success'
-    });
+    onNotify && onNotify(`File ${selectedFile.name} downloaded`, 'success');
   };
 
   /**
@@ -338,25 +323,16 @@ variable "subnet_cidr" {
   const handleDownloadAllFiles = async () => {
     try {
       // In un'implementazione reale, chiameremo apiService.downloadFile
-      onNotify && onNotify({
-        message: 'Downloading all Terraform files as ZIP...',
-        type: 'info'
-      });
+      onNotify && onNotify('Downloading all Terraform files as ZIP...', 'info');
       
       await apiService.downloadFile('terraform', terraformPath);
       
       // Simulazione per scopi di dimostrazione
       //await new Promise(resolve => setTimeout(resolve, 1500));
       
-      onNotify && onNotify({
-        message: 'Terraform files downloaded successfully',
-        type: 'success'
-      });
+      onNotify && onNotify('Terraform files downloaded successfully', 'success');
     } catch (error) {
-      onNotify && onNotify({
-        message: `Error downloading files: ${error.message}`,
-        type: 'error'
-      });
+      onNotify && onNotify(`Error downloading files: ${error.message}`, 'error');
     }
   };
 
