@@ -286,6 +286,7 @@ export default function NetworkAnalyzerDashboard() {
         return (
           <TerraformTab 
             results={analysisResults}
+            isCloudConnected={isConnectedToCloud}
             onNotify={addNotification}
           />
         );

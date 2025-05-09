@@ -13,6 +13,7 @@ from werkzeug.utils import secure_filename
 from collections import Counter
 from analysis_orchestrator import AnalysisOrchestrator
 from config import logger, DEFAULT_OUTPUT_DIR
+from terraform_manager import TerraformManager
 
 app = Flask(__name__)
 CORS(app)  # Permette chiamate da frontend React
@@ -344,6 +345,268 @@ def determine_terraform_file_type(file_name, file_path):
     # Tipo predefinito se non è possibile determinarlo
     return 'configuration'
 
+# Aggiungi questi endpoint nella classe Flask dell'API
+@app.route('/api/terraform/init', methods=['POST'])
+def terraform_init():
+    """
+    Endpoint per inizializzare Terraform nella directory specificata
+    """
+    try:
+        terraform_dir = request.json.get('terraformPath')
+        
+        if not terraform_dir or not os.path.exists(terraform_dir):
+            return jsonify({
+                'status': 'error', 
+                'message': 'Directory Terraform non valida'
+            }), 400
+        
+        # Inizializza il manager Terraform
+        manager = TerraformManager(terraform_dir)
+        result = manager.init()
+        
+        if result['success']:
+            return jsonify({
+                'status': 'success',
+                'message': 'Terraform inizializzato con successo',
+                'output': result['output']
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Errore durante l\'inizializzazione di Terraform',
+                'error': result['error']
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Errore durante l'inizializzazione Terraform: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/terraform/validate', methods=['POST'])
+def terraform_validate():
+    """
+    Endpoint per validare la configurazione Terraform
+    """
+    try:
+        terraform_dir = request.json.get('terraformPath')
+        
+        if not terraform_dir or not os.path.exists(terraform_dir):
+            return jsonify({
+                'status': 'error', 
+                'message': 'Directory Terraform non valida'
+            }), 400
+        
+        # Inizializza il manager Terraform
+        manager = TerraformManager(terraform_dir)
+        result = manager.validate()
+        
+        if result['success']:
+            return jsonify({
+                'status': 'success',
+                'message': 'Configurazione Terraform valida',
+                'output': result['output']
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Configurazione Terraform non valida',
+                'error': result['error']
+            }), 400
+    
+    except Exception as e:
+        logger.error(f"Errore durante la validazione Terraform: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/terraform/plan', methods=['POST'])
+def terraform_plan():
+    """
+    Endpoint per eseguire terraform plan
+    """
+    try:
+        terraform_dir = request.json.get('terraformPath')
+        
+        if not terraform_dir or not os.path.exists(terraform_dir):
+            return jsonify({
+                'status': 'error', 
+                'message': 'Directory Terraform non valida'
+            }), 400
+        
+        # Inizializza il manager Terraform
+        manager = TerraformManager(terraform_dir)
+        
+        # Prima inizializza
+        init_result = manager.init()
+        if not init_result['success']:
+            return jsonify({
+                'status': 'error',
+                'message': 'Errore durante l\'inizializzazione di Terraform',
+                'error': init_result['error']
+            }), 500
+        
+        # Poi esegui il plan
+        plan_result = manager.plan()
+        
+        if plan_result['success']:
+            return jsonify({
+                'status': 'success',
+                'message': 'Plan Terraform completato',
+                'has_changes': plan_result['has_changes'],
+                'plan_summary': plan_result['plan_summary'],
+                'plan_file': plan_result['plan_file'],
+                'output': plan_result['output']
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Errore durante l\'esecuzione del plan Terraform',
+                'error': plan_result['error']
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Errore durante l'esecuzione di terraform plan: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/terraform/apply', methods=['POST'])
+def terraform_apply():
+    """
+    Endpoint per eseguire terraform apply
+    """
+    try:
+        terraform_dir = request.json.get('terraformPath')
+        plan_file = request.json.get('planFile')
+        auto_approve = request.json.get('autoApprove', False)
+        
+        if not terraform_dir or not os.path.exists(terraform_dir):
+            return jsonify({
+                'status': 'error', 
+                'message': 'Directory Terraform non valida'
+            }), 400
+        
+        # Se è specificato un file plan, verifica che esista
+        if plan_file and not os.path.exists(plan_file):
+            return jsonify({
+                'status': 'error', 
+                'message': 'File di piano Terraform non trovato'
+            }), 400
+        
+        # Inizializza il manager Terraform
+        manager = TerraformManager(terraform_dir)
+        
+        # Esegui apply
+        apply_result = manager.apply(plan_file, auto_approve)
+        
+        if apply_result['success']:
+            # Recupera gli output Terraform dopo il deployment
+            outputs = manager.get_outputs()
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Infrastruttura Terraform deployata con successo',
+                'output': apply_result['output'],
+                'terraform_outputs': outputs.get('outputs', {}) if outputs['success'] else {}
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Errore durante il deploy dell\'infrastruttura Terraform',
+                'error': apply_result['error']
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Errore durante l'esecuzione di terraform apply: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/terraform/destroy', methods=['POST'])
+def terraform_destroy():
+    """
+    Endpoint per eseguire terraform destroy
+    """
+    try:
+        terraform_dir = request.json.get('terraformPath')
+        auto_approve = request.json.get('autoApprove', False)
+        
+        if not terraform_dir or not os.path.exists(terraform_dir):
+            return jsonify({
+                'status': 'error', 
+                'message': 'Directory Terraform non valida'
+            }), 400
+        
+        # Inizializza il manager Terraform
+        manager = TerraformManager(terraform_dir)
+        
+        # Esegui destroy
+        destroy_result = manager.destroy(auto_approve)
+        
+        if destroy_result['success']:
+            return jsonify({
+                'status': 'success',
+                'message': 'Infrastruttura Terraform distrutta con successo',
+                'output': destroy_result['output']
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Errore durante la distruzione dell\'infrastruttura Terraform',
+                'error': destroy_result['error']
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Errore durante l'esecuzione di terraform destroy: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/terraform/status', methods=['GET'])
+def terraform_status():
+    """
+    Endpoint per verificare lo stato attuale dell'infrastruttura Terraform
+    """
+    try:
+        terraform_dir = request.args.get('terraformPath')
+        
+        if not terraform_dir or not os.path.exists(terraform_dir):
+            return jsonify({
+                'status': 'error', 
+                'message': 'Directory Terraform non valida'
+            }), 400
+        
+        # Inizializza il manager Terraform
+        manager = TerraformManager(terraform_dir)
+        
+        # Verifica se è stato già inizializzato
+        init_dir = os.path.join(terraform_dir, ".terraform")
+        is_initialized = os.path.exists(init_dir)
+        
+        # Cerca di ottenere gli output (funziona solo se è stato fatto apply)
+        outputs_result = manager.get_outputs()
+        is_deployed = outputs_result['success']
+        
+        return jsonify({
+            'status': 'success',
+            'is_initialized': is_initialized,
+            'is_deployed': is_deployed,
+            'outputs': outputs_result.get('outputs', {}) if is_deployed else {}
+        })
+    
+    except Exception as e:
+        logger.error(f"Errore durante il recupero dello stato Terraform: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+        
 if __name__ == '__main__':
     # Assicurati che la directory di output esista
     os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)

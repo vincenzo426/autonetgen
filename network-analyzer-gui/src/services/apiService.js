@@ -210,7 +210,174 @@ const apiService = {
       console.error(`Failed to save file ${fileName}:`, error);
       throw error;
     }
+  },
+
+  /**
+ * Inizializza Terraform nella directory specificata
+ * @param {string} terraformPath - Percorso della directory Terraform
+ * @returns {Promise<Object>} Risultato dell'operazione
+ */
+  initTerraform: async (terraformPath) => {
+  try {
+    const response = await fetch(`${API_URL}/terraform/init`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ terraformPath }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Terraform init failed:', error);
+    throw error;
   }
+},
+
+/**
+ * Valida la configurazione Terraform
+ * @param {string} terraformPath - Percorso della directory Terraform
+ * @returns {Promise<Object>} Risultato della validazione
+ */
+validateTerraform: async (terraformPath) => {
+  try {
+    const response = await fetch(`${API_URL}/terraform/validate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ terraformPath }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Terraform validate failed:', error);
+    throw error;
+  }
+},
+
+/**
+ * Esegue terraform plan
+ * @param {string} terraformPath - Percorso della directory Terraform
+ * @returns {Promise<Object>} Risultato del plan
+ */
+planTerraform: async (terraformPath) => {
+  try {
+    const response = await fetch(`${API_URL}/terraform/plan`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ terraformPath }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Terraform plan failed:', error);
+    throw error;
+  }
+},
+
+/**
+ * Esegue terraform apply
+ * @param {string} terraformPath - Percorso della directory Terraform
+ * @param {string} planFile - File del piano Terraform (opzionale)
+ * @param {boolean} autoApprove - Se approvare automaticamente il piano
+ * @returns {Promise<Object>} Risultato dell'operazione apply
+ */
+applyTerraform: async (terraformPath, planFile = null, autoApprove = false) => {
+  try {
+    const response = await fetch(`${API_URL}/terraform/apply`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        terraformPath,
+        planFile,
+        autoApprove
+      }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Terraform apply failed:', error);
+    throw error;
+  }
+},
+
+/**
+ * Esegue terraform destroy
+ * @param {string} terraformPath - Percorso della directory Terraform
+ * @param {boolean} autoApprove - Se approvare automaticamente la distruzione
+ * @returns {Promise<Object>} Risultato dell'operazione destroy
+ */
+destroyTerraform: async (terraformPath, autoApprove = false) => {
+  try {
+    const response = await fetch(`${API_URL}/terraform/destroy`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        terraformPath,
+        autoApprove
+      }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Terraform destroy failed:', error);
+    throw error;
+  }
+},
+
+/**
+ * Verifica lo stato attuale dell'infrastruttura Terraform
+ * @param {string} terraformPath - Percorso della directory Terraform
+ * @returns {Promise<Object>} Stato dell'infrastruttura
+ */
+getTerraformStatus: async (terraformPath) => {
+  try {
+    const response = await fetch(`${API_URL}/terraform/status?terraformPath=${encodeURIComponent(terraformPath)}`);
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Failed to get Terraform status:', error);
+    throw error;
+  }
+}
+  
 };
 
 export default apiService;
