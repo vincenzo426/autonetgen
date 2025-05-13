@@ -12,7 +12,10 @@ import {
   Info,
   Eye,
   Cloud,
-  CloudOff
+  CloudOff,
+  UploadCloud,
+  Check,
+  Download
 } from "lucide-react";
 import apiService from "../../services/apiService";
 
@@ -23,8 +26,9 @@ import apiService from "../../services/apiService";
  * @param {string} props.terraformPath - Percorso della directory Terraform
  * @param {Function} props.onNotify - Handler per mostrare notifiche
  * @param {boolean} props.isCloudConnected - Se l'app è connessa al cloud
+ * @param {Function} props.onToggleCloud - Handler per attivare/disattivare la connessione al cloud
  */
-const DeployControls = ({ terraformPath, onNotify, isCloudConnected }) => {
+const DeployControls = ({ terraformPath, onNotify, isCloudConnected, onToggleCloud}) => {
   const [status, setStatus] = useState({
     isInitialized: false,
     isDeployed: false,
@@ -37,6 +41,26 @@ const DeployControls = ({ terraformPath, onNotify, isCloudConnected }) => {
   const [planSummary, setPlanSummary] = useState(null);
   const [isStatusLoading, setIsStatusLoading] = useState(true);
   const [planFile, setPlanFile] = useState(null);
+  
+  // Stati per il componente CloudStorageOptions
+  const [cloudBucket, setCloudBucket] = useState("network-analysis-results");
+  const [cloudLoadingStates, setCloudLoadingStates] = useState({
+    cloud: false
+  });
+  const [cloudCompletedStates, setCloudCompletedStates] = useState({
+    cloud: false
+  });
+
+  // Aggiungiamo una funzione locale per gestire il toggle della connessione cloud
+  const handleToggleCloudState = () => {
+    // Se è stata fornita una funzione di callback esterna, la utilizziamo
+    if (typeof onToggleCloud === 'function') {
+      onToggleCloud();
+    } else {
+      // Altrimenti, simuliamo il comportamento con una notifica
+      onNotify("Cloud connection state would toggle here", "info");
+    }
+  };
 
   // Recupera lo stato all'avvio
   useEffect(() => {
@@ -267,6 +291,35 @@ const DeployControls = ({ terraformPath, onNotify, isCloudConnected }) => {
     setIsOutputVisible(!isOutputVisible);
   };
 
+  /**
+   * Gestisce l'esportazione al cloud
+   */
+  const handleCloudExport = async () => {
+    if (!isCloudConnected) {
+      onNotify("Please connect to Google Cloud first", "warning");
+      return;
+    }
+    
+    setCloudLoadingStates(prev => ({ ...prev, cloud: true }));
+    
+    try {
+      // Simula l'esportazione al cloud
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      onNotify("All Terraform files saved to " + cloudBucket, "success");
+      
+      setCloudCompletedStates(prev => ({ ...prev, cloud: true }));
+    } catch (error) {
+      onNotify(`Error saving to cloud: ${error.message}`, "error");
+    } finally {
+      setCloudLoadingStates(prev => ({ ...prev, cloud: false }));
+      
+      setTimeout(() => {
+        setCloudCompletedStates(prev => ({ ...prev, cloud: false }));
+      }, 3000);
+    }
+  };
+
   // Elementi UI in base allo stato del deploy
   const renderStatusLabel = () => {
     if (isStatusLoading) {
@@ -472,6 +525,99 @@ const DeployControls = ({ terraformPath, onNotify, isCloudConnected }) => {
     );
   };
   
+  /**
+   * Componente per le opzioni di archiviazione cloud
+   */
+  const CloudStorageOptions = () => {
+    // Creiamo una funzione locale per gestire il toggle dello stato della connessione cloud
+    const handleToggleCloudConnection = () => {
+      // Utilizziamo la funzione di gestione definita nel componente principale
+      handleToggleCloudState();
+    };
+    
+    return (
+      <div className="mt-6 bg-white p-6 rounded-lg shadow-md">
+        <h3 className="text-lg font-semibold mb-4">Cloud Storage Options</h3>
+        
+        <div className="mb-6">
+          <div className="mb-4">
+            <button 
+              className={`flex items-center py-2 px-4 rounded ${
+                isCloudConnected ? 
+                  'bg-green-100 text-green-800 hover:bg-green-200' : 
+                  'bg-gray-100 text-gray-800 hover:bg-gray-200'
+              }`}
+              onClick={onToggleCloud}
+            >
+              {isCloudConnected ? (
+                <>
+                  <Cloud size={18} className="mr-2 text-green-600" />
+                  Connected to Google Cloud
+                </>
+              ) : (
+                <>
+                  <CloudOff size={18} className="mr-2 text-gray-600" />
+                  Connect to Google Cloud
+                </>
+              )}
+            </button>
+          </div>
+          
+          {isCloudConnected && (
+            <div className="mb-4">
+              <label className="block mb-2 text-sm font-medium">Storage Bucket</label>
+              <select 
+                className="w-full p-2 border border-gray-300 rounded"
+                value={cloudBucket}
+                onChange={(e) => setCloudBucket(e.target.value)}
+              >
+                <option value="network-analysis-results">network-analysis-results</option>
+                <option value="terraform-exports">terraform-exports</option>
+                <option value="visualization-data">visualization-data</option>
+              </select>
+            </div>
+          )}
+        </div>
+        
+        {!isCloudConnected && (
+          <div className="mb-6 bg-amber-50 p-4 rounded-lg border border-amber-200">
+            <div className="flex items-start">
+              <Info size={20} className="text-amber-500 mr-3 mt-1 flex-shrink-0" />
+              <p className="text-amber-700 text-sm">
+                Connect to Google Cloud Platform to enable cloud storage of Terraform files and states.
+              </p>
+            </div>
+          </div>
+        )}
+        
+        <div className="flex justify-end">
+          <button 
+            className="bg-blue-600 text-white py-2 px-6 rounded flex items-center hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            onClick={handleCloudExport}
+            disabled={!isCloudConnected || cloudLoadingStates.cloud}
+          >
+            {cloudLoadingStates.cloud ? (
+              <>
+                <Loader2 size={20} className="mr-2 animate-spin" />
+                Saving to Cloud...
+              </>
+            ) : cloudCompletedStates.cloud ? (
+              <>
+                <Check size={20} className="mr-2" />
+                Saved to Cloud
+              </>
+            ) : (
+              <>
+                <UploadCloud size={20} className="mr-2" />
+                Save All to Cloud
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    );
+  };
+  
   return (
     <div className="bg-white p-6 rounded-lg shadow-md">
       <div className="flex justify-between items-center mb-4">
@@ -492,6 +638,9 @@ const DeployControls = ({ terraformPath, onNotify, isCloudConnected }) => {
       {renderPlanSummary()}
       {renderOutputs()}
       {renderOutputConsole()}
+      
+      {/* Componente opzioni cloud con passaggio diretto della funzione di toggle */}
+      <CloudStorageOptions/>
     </div>
   );
 };

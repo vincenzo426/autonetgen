@@ -11,8 +11,9 @@ import DeployControls from '../terraform/DeployControls';
  * @param {Object} props.results - Risultati dell'analisi
  * @param {boolean} props.isCloudConnected - Indica se è attiva la connessione al cloud
  * @param {Function} props.onNotify - Handler per mostrare notifiche
+ * @param {Function} props.onToggleCloud - Handler per attivare/disattivare la connessione al cloud
  */
-const TerraformTab = ({ results, isCloudConnected, onNotify }) => {
+const TerraformTab = ({ results, isCloudConnected, onNotify,onToggleCloud }) => {
   const [selectedSection, setSelectedSection] = useState('files'); // files, deploy
   
   if (!results || !results.output_paths || !results.output_paths.terraform) {
@@ -72,6 +73,7 @@ const TerraformTab = ({ results, isCloudConnected, onNotify }) => {
           terraformPath={results.output_paths.terraform} 
           onNotify={onNotify}
           isCloudConnected={isCloudConnected}
+          onToggleCloud={onToggleCloud}
         />
       )}
     </div>

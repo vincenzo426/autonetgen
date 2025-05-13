@@ -37,11 +37,11 @@ const Sidebar = ({
       name: "Results", 
       icon: Activity 
     },
-    { 
+   /* { 
       id: "export", 
       name: "Export", 
       icon: Download 
-    }
+    }*/
   ];
   
   // Funzione di supporto per ottenere il componente icona
