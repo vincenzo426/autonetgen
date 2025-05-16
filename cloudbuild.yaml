@@ -1,0 +1,48 @@
+steps:
+  # Build network-analyzer-gui
+  - name: 'gcr.io/cloud-builders/docker'
+    dir: 'network-analyzer-gui'
+    args: [
+      'build', '-t', 'europe-west6-docker.pkg.dev/$PROJECT_ID/autonetgen/network-analyzer-gui:latest', '.'
+    ]
+
+  # Build backend
+  - name: 'gcr.io/cloud-builders/docker'
+    dir: 'backend'
+    args: [
+      'build', '-t', 'europe-west6-docker.pkg.dev/$PROJECT_ID/autonetgen/backend:latest', '.'
+    ]
+
+  # Push network-analyzer-gui
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'europe-west6-docker.pkg.dev/$PROJECT_ID/autonetgen/network-analyzer-gui:latest']
+
+  # Push backend
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'europe-west6-docker.pkg.dev/$PROJECT_ID/autonetgen/backend:latest']
+
+  # Deploy network-analyzer-gui to Cloud Run (optional)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args: [
+      'run', 'deploy', 'network-analyzer-gui',
+      '--image', 'europe-west6-docker.pkg.dev/$PROJECT_ID/autonetgen/network-analyzer-gui:latest',
+      '--region', 'europe-west6',
+      '--platform', 'managed',
+      '--allow-unauthenticated'
+    ]
+
+  # Deploy backend to Cloud Run (optional)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args: [
+      'run', 'deploy', 'backend',
+      '--image', 'europe-west6-docker.pkg.dev/$PROJECT_ID/autonetgen/backend:latest',
+      '--region', 'europe-west6',
+      '--platform', 'managed',
+      '--allow-unauthenticated'
+    ]
+
+images:
+  - europe-west6-docker.pkg.dev/$PROJECT_ID/autonetgen/network-analyzer-gui:latest
+  - europe-west6-docker.pkg.dev/$PROJECT_ID/autonetgen/backend:latest
