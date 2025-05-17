@@ -1,0 +1,47 @@
+# Usa Python 3.9 per massima compatibilità 
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Installa dipendenze di sistema necessarie
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    python3-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copia file di requisiti
+COPY backend/setup.py requirements.txt ./
+
+# Aggiunge dipendenze API per Flask (che non è incluso in setup.py)
+RUN echo "flask==2.2.3\nflask-cors==3.0.10\ngunicorn==20.1.0\npsycopg2-binary==2.9.5\nredis==4.5.1\ngoogle-cloud-secret-manager==2.12.6\ngoogle-cloud-storage==2.7.0" >> requirements.txt
+
+# Installa dipendenze
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -e .
+
+# Copia il codice del backend
+COPY backend ./backend/
+COPY backend/api.py .
+
+# Crea directory per i dati temporanei
+RUN mkdir -p /tmp/uploads
+
+# Espone la porta utilizzata da gunicorn
+EXPOSE 8080
+
+# Configurazione delle variabili d'ambiente
+ENV PYTHONUNBUFFERED=1 \
+    PORT=8080 \
+    DEFAULT_OUTPUT_DIR=/tmp/output
+
+# Script di avvio del servizio
+COPY backend/startup.sh ./
+RUN chmod +x ./startup.sh
+
+# Endpoint di health check
+COPY backend/health_check.py ./
+
+# Avvia l'applicazione
+CMD ["./startup.sh"]

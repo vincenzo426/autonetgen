@@ -1,0 +1,49 @@
+# Usa un'immagine base con le dipendenze per la network analysis
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Installa dipendenze di sistema per librerie di analysis
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpcap-dev \
+    tshark \
+    graphviz \
+    python3-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copia file per l'installazione
+COPY backend/setup.py requirements-analyzer.txt ./
+
+# Aggiunge dipendenze aggiuntive per l'analizzatore
+RUN echo "flask==2.2.3\nflask-cors==3.0.10\ngunicorn==20.1.0\npsycopg2-binary==2.9.5\ngoogle-cloud-secret-manager==2.12.6\ngoogle-cloud-storage==2.7.0\nscapy==2.5.0\nnetworkx==3.0\nmatplotlib==3.7.0\npandas==1.5.3\nnumpy==1.24.2" > requirements-analyzer.txt
+
+# Installa dipendenze
+RUN pip install --no-cache-dir -r requirements-analyzer.txt
+RUN pip install -e .
+
+# Copia il codice dell'analizzatore
+COPY backend ./backend/
+
+# Crea directory per temporary files
+RUN mkdir -p /tmp/analysis /tmp/output /tmp/uploads
+
+# Espone la porta utilizzata dall'applicazione
+EXPOSE 8080
+
+# Configurazione delle variabili d'ambiente
+ENV PYTHONUNBUFFERED=1 \
+    PORT=8080 \
+    DEFAULT_OUTPUT_DIR=/tmp/output \
+    ANALYZER_MODE=api
+
+# Script di startup
+COPY backend/analyzer_startup.sh ./
+RUN chmod +x ./analyzer_startup.sh
+
+# Endpoint di health check
+COPY backend/health_check.py ./
+
+# Avvia l'applicazione
+CMD ["./analyzer_startup.sh"]
