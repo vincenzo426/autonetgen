@@ -1,0 +1,32 @@
+# Dipendenze core per il backend
+Flask==2.3.3
+Flask-CORS==4.0.0
+Werkzeug==2.3.7
+
+# Analisi di rete
+scapy==2.5.0
+pandas==2.1.1
+numpy==1.24.3
+
+# Visualizzazione e grafici
+graphviz==0.20.1
+networkx==3.1
+matplotlib==3.7.2
+
+# File processing
+python-magic==0.4.27
+
+# Logging e utilità
+python-dotenv==1.0.0
+
+# Cloud Storage (opzionale per GCP)
+google-cloud-storage==2.10.0
+
+# Server HTTP per produzione
+gunicorn==21.2.0
+
+# Health check
+requests==2.31.0
+
+# JSON processing
+jsonschema==4.19.1
