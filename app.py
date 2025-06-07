@@ -10,6 +10,9 @@ import logging
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
+# Global flag per il controllo di startup
+startup_executed = False
+
 # Configura logging per Cloud Run
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +34,22 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
+
+def startup_check():
+    """Verifica di avvio"""
+    global startup_executed
+    if not startup_executed:
+        logger.info("=== AVVIO BACKEND AUTONETGEN ===")
+        logger.info(f"Upload folder: {UPLOAD_FOLDER}")
+        logger.info(f"Output folder: {OUTPUT_FOLDER}")
+        logger.info(f"Port: {os.environ.get('PORT', '8080')}")
+        logger.info("=== BACKEND PRONTO ===")
+        startup_executed = True
+
+# Middleware per eseguire startup check alla prima richiesta
+@app.before_request
+def ensure_startup():
+    startup_check()
 
 # Health check endpoint per Cloud Run (OBBLIGATORIO)
 @app.route('/health')
@@ -134,16 +153,6 @@ def internal_error(error):
 def too_large(error):
     return jsonify({'error': 'File troppo grande (max 100MB)'}), 413
 
-# Startup check
-@app.before_first_request
-def startup_check():
-    """Verifica di avvio"""
-    logger.info("=== AVVIO BACKEND AUTONETGEN ===")
-    logger.info(f"Upload folder: {UPLOAD_FOLDER}")
-    logger.info(f"Output folder: {OUTPUT_FOLDER}")
-    logger.info(f"Port: {os.environ.get('PORT', '8080')}")
-    logger.info("=== BACKEND PRONTO ===")
-
 if __name__ == '__main__':
     # Ottieni la porta dalla variabile d'ambiente (requirement di Cloud Run)
     port = int(os.environ.get('PORT', 8080))
@@ -154,6 +163,9 @@ if __name__ == '__main__':
     logger.info(f"Upload folder: {UPLOAD_FOLDER}")
     logger.info(f"Output folder: {OUTPUT_FOLDER}")
     logger.info("==========================================")
+    
+    # Esegui startup check se eseguito direttamente
+    startup_check()
     
     # Avvia l'app con configurazione per Cloud Run
     app.run(
