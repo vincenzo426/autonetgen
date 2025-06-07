@@ -57,11 +57,6 @@ resource "google_compute_backend_service" "frontend_backend" {
     group = google_compute_region_network_endpoint_group.frontend_neg.id
   }
 
-  iap {
-    oauth2_client_id     = null
-    oauth2_client_secret = null
-  }
-
   log_config {
     enable      = true
     sample_rate = 1.0

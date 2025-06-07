@@ -74,7 +74,7 @@ output "ssl_certificate_status" {
 # Monitoring
 output "monitoring_dashboard_url" {
   description = "Cloud Monitoring dashboard URL"
-  value       = var.enable_monitoring ? "https://console.cloud.google.com/monitoring/dashboards/custom/${google_monitoring_dashboard.autonetgen_dashboard[0].id}?project=${var.project_id}" : "Monitoring disabled"
+  value       = var.enable_monitoring ? "https://console.cloud.google.com/monitoring/dashboards/custom/${google_monitoring_dashboard.autonetgen_dashboard[0].id}?project=${var.project_id}" : null
 }
 
 output "uptime_checks" {
@@ -82,7 +82,12 @@ output "uptime_checks" {
   value = var.enable_monitoring ? {
     frontend_check_id = google_monitoring_uptime_check_config.frontend_uptime[0].uptime_check_id
     backend_check_id  = google_monitoring_uptime_check_config.backend_uptime[0].uptime_check_id
-  } : {}
+    monitoring_enabled = true
+  } : {
+    frontend_check_id = null
+    backend_check_id  = null
+    monitoring_enabled = false
+  }
 }
 
 # Build Information
@@ -91,7 +96,13 @@ output "build_triggers" {
   value = var.github_repo != null ? {
     frontend_trigger = google_cloudbuild_trigger.frontend_trigger[0].name
     backend_trigger  = google_cloudbuild_trigger.backend_trigger[0].name
-  } : "No GitHub repository configured"
+    github_repo      = "${var.github_repo.owner}/${var.github_repo.name}"
+  } : {
+    message = "No GitHub repository configured"
+    frontend_trigger = null
+    backend_trigger  = null
+    github_repo      = null
+  }
 }
 
 # Cost Information
@@ -126,7 +137,13 @@ output "dns_configuration" {
       ttl   = 300
     }
     ssl_note = "SSL certificate will be automatically provisioned once DNS is configured"
-  } : "No domain configured - using IP address access only"
+    domain_configured = true
+  } : {
+    message = "No domain configured - using IP address access only"
+    dns_record = null
+    ssl_note = "Configure a domain to enable automatic SSL certificates"
+    domain_configured = false
+  }
 }
 
 # Quick Start Commands

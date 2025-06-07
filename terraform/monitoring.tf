@@ -135,7 +135,7 @@ resource "google_monitoring_alert_policy" "cloud_run_errors" {
     condition_threshold {
       filter          = "metric.type=\"run.googleapis.com/request_count\" AND resource.type=\"cloud_run_revision\""
       duration        = "300s"
-      comparison      = "COMPARISON_GREATER_THAN"
+      comparison      = "COMPARISON_GT"
       threshold_value = 10
       
       aggregations {
@@ -164,7 +164,7 @@ resource "google_monitoring_alert_policy" "cpu_utilization" {
     condition_threshold {
       filter          = "metric.type=\"run.googleapis.com/container/cpu/utilizations\" AND resource.type=\"cloud_run_revision\""
       duration        = "300s"
-      comparison      = "COMPARISON_GREATER_THAN"
+      comparison      = "COMPARISON_GT"
       threshold_value = 0.8
       
       aggregations {
