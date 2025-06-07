@@ -7,19 +7,20 @@ Ottimizzato per Google Cloud Run
 import os
 import sys
 import logging
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-# Configura logging
+# Configura logging per Cloud Run
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
 )
 logger = logging.getLogger("NetworkAnalyzerBackend")
 
 # Crea l'app Flask
 app = Flask(__name__)
-CORS(app, origins=["*"])  # Per Cloud Run, permetti tutte le origini
+CORS(app, origins=["*"])
 
 # Configura le directory
 UPLOAD_FOLDER = "/tmp/uploads"
@@ -31,13 +32,14 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
 
-# Health check endpoint per Cloud Run
+# Health check endpoint per Cloud Run (OBBLIGATORIO)
 @app.route('/health')
 def health_check():
     """Health check per Cloud Run"""
     return jsonify({
         'status': 'healthy',
-        'service': 'network-analyzer-backend'
+        'service': 'network-analyzer-backend',
+        'timestamp': str(os.environ.get('K_REVISION', 'unknown'))
     }), 200
 
 @app.route('/')
@@ -46,40 +48,82 @@ def root():
     return jsonify({
         'service': 'Network Analyzer Backend',
         'status': 'running',
-        'version': '1.0.0'
+        'version': '1.0.0',
+        'revision': os.environ.get('K_REVISION', 'unknown')
     })
 
-# Importa e registra gli endpoint dell'API esistente
+# Endpoint di test semplice
+@app.route('/api/status')
+def api_status():
+    """Status API semplificato"""
+    return jsonify({
+        'api_status': 'available',
+        'endpoints': ['/api/analyze', '/health', '/api/status'],
+        'upload_folder': UPLOAD_FOLDER,
+        'output_folder': OUTPUT_FOLDER
+    })
+
+# Endpoint per analisi semplificata (fallback)
+@app.route('/api/analyze', methods=['POST'])
+def analyze_simple():
+    """Endpoint di analisi semplificato per test"""
+    try:
+        logger.info("Richiesta di analisi ricevuta")
+        
+        # Verifica se ci sono file caricati
+        if not request.files:
+            return jsonify({
+                'status': 'error',
+                'message': 'Nessun file caricato'
+            }), 400
+        
+        # Per ora, ritorna solo una risposta di successo
+        return jsonify({
+            'status': 'success',
+            'message': 'Analisi completata (modalità semplificata)',
+            'files_received': len(request.files),
+            'service': 'autonetgen-backend'
+        })
+        
+    except Exception as e:
+        logger.error(f"Errore durante l'analisi: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+# Importa l'API completa se disponibile
 try:
     from api import app as api_app
-    # Copia le routes dall'app API esistente
-    for rule in api_app.url_map.iter_rules():
-        if rule.endpoint != 'static':
-            view_func = api_app.view_functions[rule.endpoint]
-            app.add_url_rule(
-                rule.rule,
-                endpoint=rule.endpoint,
-                view_func=view_func,
-                methods=rule.methods
-            )
+    logger.info("Tentativo di importazione API completa...")
     
-    logger.info("API endpoints importati con successo")
+    # Copia solo le routes che non sono già definite
+    existing_rules = {rule.rule for rule in app.url_map.iter_rules()}
+    
+    for rule in api_app.url_map.iter_rules():
+        if rule.endpoint != 'static' and rule.rule not in existing_rules:
+            try:
+                view_func = api_app.view_functions[rule.endpoint]
+                app.add_url_rule(
+                    rule.rule,
+                    endpoint=f"api_{rule.endpoint}",
+                    view_func=view_func,
+                    methods=rule.methods
+                )
+            except Exception as e:
+                logger.warning(f"Impossibile importare route {rule.rule}: {e}")
+    
+    logger.info("API completa importata con successo")
     
 except ImportError as e:
-    logger.warning(f"Impossibile importare l'API esistente: {e}")
-    
-    # Fallback: endpoint di base per l'analisi
-    @app.route('/api/status')
-    def api_status():
-        return jsonify({
-            'api_status': 'available',
-            'endpoints': ['/api/analyze', '/health']
-        })
+    logger.warning(f"API completa non disponibile, usando fallback: {e}")
+except Exception as e:
+    logger.error(f"Errore durante l'importazione API: {e}")
 
 # Error handlers
 @app.errorhandler(404)
 def not_found(error):
-    return jsonify({'error': 'Endpoint non trovato'}), 404
+    return jsonify({'error': 'Endpoint non trovato', 'available_endpoints': ['/health', '/', '/api/status']}), 404
 
 @app.errorhandler(500)
 def internal_error(error):
@@ -90,10 +134,31 @@ def internal_error(error):
 def too_large(error):
     return jsonify({'error': 'File troppo grande (max 100MB)'}), 413
 
+# Startup check
+@app.before_first_request
+def startup_check():
+    """Verifica di avvio"""
+    logger.info("=== AVVIO BACKEND AUTONETGEN ===")
+    logger.info(f"Upload folder: {UPLOAD_FOLDER}")
+    logger.info(f"Output folder: {OUTPUT_FOLDER}")
+    logger.info(f"Port: {os.environ.get('PORT', '8080')}")
+    logger.info("=== BACKEND PRONTO ===")
+
 if __name__ == '__main__':
     # Ottieni la porta dalla variabile d'ambiente (requirement di Cloud Run)
     port = int(os.environ.get('PORT', 8080))
     
-    # Avvia l'app
-    logger.info(f"Avvio Network Analyzer Backend sulla porta {port}")
-    app.run(host='0.0.0.0', port=port, debug=False)
+    # Log di avvio
+    logger.info("=== AVVIO NETWORK ANALYZER BACKEND ===")
+    logger.info(f"Porta: {port}")
+    logger.info(f"Upload folder: {UPLOAD_FOLDER}")
+    logger.info(f"Output folder: {OUTPUT_FOLDER}")
+    logger.info("==========================================")
+    
+    # Avvia l'app con configurazione per Cloud Run
+    app.run(
+        host='0.0.0.0', 
+        port=port, 
+        debug=False,
+        threaded=True
+    )

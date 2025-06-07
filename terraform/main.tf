@@ -65,16 +65,13 @@ resource "google_cloud_run_service" "backend" {
       
       # Configurazione economica
       container_concurrency = 10
-      timeout_seconds       = 300
-      
+
       containers {
         image = var.backend_image_url
         
         ports {
           container_port = 8080
         }
-        
-        # Variabili di ambiente
         
         env {
           name  = "GOOGLE_CLOUD_PROJECT"
@@ -86,25 +83,55 @@ resource "google_cloud_run_service" "backend" {
           value = google_storage_bucket.autonetgen_storage.name
         }
         
+        env {
+          name  = "PYTHONUNBUFFERED"
+          value = "1"
+        }
+        
         # Configurazione risorse economica
         resources {
           limits = {
-            cpu    = "1"
-            memory = "1Gi"
+            cpu    = var.cpu_limit
+            memory = var.memory_limit
           }
           requests = {
             cpu    = "0.5"
             memory = "512Mi"
           }
         }
+        
+        # Startup probe per evitare timeout
+        startup_probe {
+          http_get {
+            path = "/health"
+            port = 8080
+          }
+          initial_delay_seconds = 10
+          timeout_seconds       = 1
+          period_seconds        = 3
+          failure_threshold     = 5
+        }
+        
+        # Liveness probe
+        liveness_probe {
+          http_get {
+            path = "/health"
+            port = 8080
+          }
+          initial_delay_seconds = 30
+          timeout_seconds       = 1
+          period_seconds        = 10
+          failure_threshold     = 3
+        }
       }
     }
     
     metadata {
       annotations = {
-        "autoscaling.knative.dev/minScale" = "0"
-        "autoscaling.knative.dev/maxScale" = "3"
+        "autoscaling.knative.dev/minScale"         = "0"
+        "autoscaling.knative.dev/maxScale"         = tostring(var.max_instances)
         "run.googleapis.com/execution-environment" = "gen2"
+        "run.googleapis.com/startup-cpu-boost"     = "true"
       }
     }
   }
