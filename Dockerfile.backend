@@ -1,47 +1,113 @@
-# Usa Python 3.9 per massima compatibilità 
-FROM python:3.9-slim
+# Optimized multi-stage Dockerfile for AutonetGen Backend on GCP Cloud Run
+FROM python:3.11-slim as base
 
-WORKDIR /app
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Installa dipendenze di sistema necessarie
+# Stage 1: Dependencies and build environment
+FROM base as builder
+
+# Install system dependencies for building
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     gcc \
+    libpcap-dev \
     libpq-dev \
     python3-dev \
-    && apt-get clean \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copia file di requisiti
-COPY backend/setup.py requirements.txt ./
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Aggiunge dipendenze API per Flask (che non è incluso in setup.py)
-RUN echo "flask==2.2.3\nflask-cors==3.0.10\ngunicorn==20.1.0\npsycopg2-binary==2.9.5\nredis==4.5.1\ngoogle-cloud-secret-manager==2.12.6\ngoogle-cloud-storage==2.7.0" >> requirements.txt
+# Copy and install Python dependencies
+COPY requirements.txt requirements-backend.txt ./
 
-# Installa dipendenze
-RUN pip install --no-cache-dir -r requirements.txt
+# Create comprehensive requirements file
+RUN echo "flask==2.3.3" > requirements-backend.txt && \
+    echo "flask-cors==4.0.0" >> requirements-backend.txt && \
+    echo "gunicorn==21.2.0" >> requirements-backend.txt && \
+    echo "psycopg2-binary==2.9.7" >> requirements-backend.txt && \
+    echo "redis==4.6.0" >> requirements-backend.txt && \
+    echo "celery==5.3.1" >> requirements-backend.txt && \
+    echo "google-cloud-storage==2.10.0" >> requirements-backend.txt && \
+    echo "google-cloud-secret-manager==2.16.4" >> requirements-backend.txt && \
+    echo "google-cloud-logging==3.8.0" >> requirements-backend.txt && \
+    echo "google-cloud-monitoring==2.15.1" >> requirements-backend.txt && \
+    echo "scapy==2.5.0" >> requirements-backend.txt && \
+    echo "networkx==3.1" >> requirements-backend.txt && \
+    echo "matplotlib==3.7.2" >> requirements-backend.txt && \
+    echo "pandas==2.0.3" >> requirements-backend.txt && \
+    echo "numpy==1.24.4" >> requirements-backend.txt && \
+    echo "graphviz==0.20.1" >> requirements-backend.txt && \
+    echo "Werkzeug==2.3.7" >> requirements-backend.txt && \
+    echo "setuptools==68.0.0" >> requirements-backend.txt
+
+# Install Python packages
+RUN pip install --upgrade pip && \
+    pip install -r requirements-backend.txt
+
+# Stage 2: Runtime environment
+FROM base as runtime
+
+# Install only runtime system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpcap0.8 \
+    libpq5 \
+    graphviz \
+    tshark \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy virtual environment from builder stage
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Create non-root user for security
+RUN groupadd -r autonetgen && useradd -r -g autonetgen autonetgen
+
+# Set working directory
+WORKDIR /app
+
+# Copy application code
+COPY backend/ ./backend/
+COPY backend/api.py ./
+COPY backend/setup.py ./
+
+# Create necessary directories
+RUN mkdir -p /tmp/output /tmp/uploads /tmp/analysis && \
+    chown -R autonetgen:autonetgen /app /tmp/output /tmp/uploads /tmp/analysis
+
+# Install the application package
 RUN pip install -e .
 
-# Copia il codice del backend
-COPY backend ./backend/
-COPY backend/api.py .
+# Copy startup script
+COPY backend/startup.sh ./
+RUN chmod +x ./startup.sh && chown autonetgen:autonetgen ./startup.sh
 
-# Crea directory per i dati temporanei
-RUN mkdir -p /tmp/uploads
+# Environment variables
+ENV PORT=8080 \
+    WORKERS=2 \
+    THREADS=4 \
+    TIMEOUT=300 \
+    MAX_REQUESTS=1000 \
+    LOG_LEVEL=info \
+    DEFAULT_OUTPUT_DIR=/tmp/output \
+    PYTHONPATH=/app
 
-# Espone la porta utilizzata da gunicorn
+# Expose port
 EXPOSE 8080
 
-# Configurazione delle variabili d'ambiente
-ENV PYTHONUNBUFFERED=1 \
-    PORT=8080 \
-    DEFAULT_OUTPUT_DIR=/tmp/output
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/api/health || exit 1
 
-# Script di avvio del servizio
-COPY backend/startup.sh ./
-RUN chmod +x ./startup.sh
+# Switch to non-root user
+USER autonetgen
 
-# Endpoint di health check
-COPY backend/health_check.py ./
-
-# Avvia l'applicazione
+# Run the application
 CMD ["./startup.sh"]

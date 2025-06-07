@@ -1,73 +1,62 @@
-# Modulo per il networking (VPC, subnets, firewall)
-module "networking" {
-  source = "./modules/networking"
+# AutonetGen - Terraform Main Configuration for GCP
 
-  project_id         = var.project_id
-  network_name       = var.network_name
-  region             = var.region
-  secondary_region   = var.secondary_region
-  subnet_cidr_ranges = var.subnet_cidr_ranges
+terraform {
+  required_version = ">= 1.0"
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 5.0"
+    }
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 5.0"
+    }
+  }
 }
 
-# Modulo per il frontend (Cloud Run service, LB esterno)
-module "frontend" {
-  source = "./modules/frontend"
-
-  project_id            = var.project_id
-  region                = var.region
-  network_id            = module.networking.network_id
-  frontend_subnet_id    = module.networking.subnet_ids["frontend"]
-  service_name          = var.frontend_service_name
-  container_image       = var.frontend_container_image
-  backend_service_url   = module.backend.backend_service_url
-  depends_on            = [module.networking, module.backend]
+# Provider configuration
+provider "google" {
+  project = var.project_id
+  region  = var.region
 }
 
-# Modulo per il backend (Cloud Run services, job orchestration)
-module "backend" {
-  source = "./modules/backend"
-
-  project_id            = var.project_id
-  region                = var.region
-  network_id            = module.networking.network_id
-  backend_subnet_id     = module.networking.subnet_ids["backend"]
-  service_name          = var.backend_service_name
-  container_image       = var.backend_container_image
-  job_service_account   = var.job_service_account_id
-  database_connection   = module.database.connection_name
-  database_user         = var.db_user
-  database_password     = var.db_password
-  database_name         = var.db_name
-  depends_on            = [module.networking, module.database]
+provider "google-beta" {
+  project = var.project_id
+  region  = var.region
 }
 
-# Modulo per il database (PostgreSQL, replica, backup)
-module "database" {
-  source = "./modules/database"
+# Enable required APIs
+resource "google_project_service" "required_apis" {
+  for_each = toset([
+    "run.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "compute.googleapis.com",
+    "storage.googleapis.com",
+    "iamcredentials.googleapis.com",
+    "logging.googleapis.com",
+    "monitoring.googleapis.com"
+  ])
 
-  project_id            = var.project_id
-  region                = var.region
-  secondary_region      = var.secondary_region
-  zones                 = var.zones
-  secondary_zones       = var.secondary_zones
-  network_id            = module.networking.network_id
-  database_subnet_id    = module.networking.subnet_ids["database"]
-  db_tier               = var.db_tier
-  db_name               = var.db_name
-  db_user               = var.db_user
-  db_password           = var.db_password
-  depends_on            = [module.networking]
+  service = each.value
+  project = var.project_id
+
+  disable_on_destroy = false
 }
 
-# Modulo per il monitoring (logging, monitoring)
-module "monitoring" {
-  source = "./modules/monitoring"
+# Random suffix for unique resource names
+resource "random_id" "suffix" {
+  byte_length = 4
+}
 
-  project_id            = var.project_id
-  enable_monitoring     = var.enable_monitoring
-  log_retention_days    = var.log_retention_days
-  frontend_service_id   = module.frontend.service_id
-  backend_service_id    = module.backend.service_id
-  database_instance_id  = module.database.primary_instance_id
-  depends_on            = [module.frontend, module.backend, module.database]
+# Locals for consistent naming
+locals {
+  name_prefix = "autonetgen"
+  suffix      = random_id.suffix.hex
+  
+  labels = {
+    app         = "autonetgen"
+    environment = var.environment
+    managed_by  = "terraform"
+  }
 }

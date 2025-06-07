@@ -1,116 +1,138 @@
-# Variabili di progetto
+# AutonetGen - Terraform Variables
+
 variable "project_id" {
-  description = "ID del progetto GCP"
+  description = "Google Cloud Project ID"
   type        = string
 }
 
 variable "region" {
-  description = "Regione predefinita per le risorse"
+  description = "Google Cloud Region"
   type        = string
   default     = "us-central1"
 }
 
-variable "zones" {
-  description = "Zone disponibili nella regione primaria"
-  type        = list(string)
-  default     = ["us-central1-a", "us-central1-b", "us-central1-c"]
-}
-
-variable "secondary_region" {
-  description = "Regione secondaria per il disaster recovery"
+variable "environment" {
+  description = "Environment name (dev, staging, prod)"
   type        = string
-  default     = "us-west1"
+  default     = "prod"
 }
 
-variable "secondary_zones" {
-  description = "Zone disponibili nella regione secondaria"
-  type        = list(string)
-  default     = ["us-west1-a", "us-west1-b"]
-}
-
-# Variabili di rete
-variable "network_name" {
-  description = "Nome della rete VPC"
+# Domain and SSL Configuration
+variable "domain_name" {
+  description = "Domain name for the application (optional)"
   type        = string
-  default     = "autonetgen-vpc"
+  default     = null
 }
 
-variable "subnet_cidr_ranges" {
-  description = "Ranges CIDR per le subnet"
-  type        = map(string)
-  default = {
-    "frontend" = "10.0.1.0/24"
-    "backend"  = "10.0.2.0/24"
-    "database" = "10.0.3.0/24"
-  }
-}
-
-# Variabili per il frontend
-variable "frontend_service_name" {
-  description = "Nome del servizio Cloud Run per il frontend"
-  type        = string
-  default     = "autonetgen-frontend"
-}
-
-variable "frontend_container_image" {
-  description = "Immagine container per il frontend"
-  type        = string
-  default     = "gcr.io/PROJECT_ID/autonetgen-frontend:latest"
-}
-
-# Variabili per il backend
-variable "backend_service_name" {
-  description = "Nome del servizio Cloud Run per il backend"
-  type        = string
-  default     = "autonetgen-backend"
-}
-
-variable "backend_container_image" {
-  description = "Immagine container per il backend"
-  type        = string
-  default     = "gcr.io/PROJECT_ID/autonetgen-backend:latest"
-}
-
-variable "job_service_account_id" {
-  description = "ID dell'account di servizio per i job"
-  type        = string
-  default     = "autonetgen-job-sa"
-}
-
-# Variabili per il database
-variable "db_tier" {
-  description = "Tier dell'istanza Cloud SQL"
-  type        = string
-  default     = "db-custom-2-4096"
-}
-
-variable "db_name" {
-  description = "Nome del database PostgreSQL"
-  type        = string
-  default     = "autonetgen_db"
-}
-
-variable "db_user" {
-  description = "Nome utente per il database"
-  type        = string
-  default     = "autonetgen_user"
-}
-
-variable "db_password" {
-  description = "Password per il database (da non memorizzare nel codice)"
-  type        = string
-  sensitive   = true
-}
-
-# Variabili per il monitoring
-variable "enable_monitoring" {
-  description = "Abilita il monitoraggio avanzato"
+variable "enable_https_redirect" {
+  description = "Enable automatic HTTPS redirect"
   type        = bool
   default     = true
 }
 
-variable "log_retention_days" {
-  description = "Giorni di conservazione dei log"
+# Container Images
+variable "frontend_container_image" {
+  description = "Frontend container image URL"
+  type        = string
+  default     = "gcr.io/PROJECT_ID/autonetgen-frontend:latest"
+}
+
+variable "backend_container_image" {
+  description = "Backend container image URL"
+  type        = string
+  default     = "gcr.io/PROJECT_ID/autonetgen-backend:latest"
+}
+
+# Cloud Run Configuration
+variable "frontend_config" {
+  description = "Frontend service configuration"
+  type = object({
+    cpu_limit    = optional(string, "1")
+    memory_limit = optional(string, "512Mi")
+    min_scale    = optional(number, 0)
+    max_scale    = optional(number, 10)
+    concurrency  = optional(number, 100)
+  })
+  default = {}
+}
+
+variable "backend_config" {
+  description = "Backend service configuration"
+  type = object({
+    cpu_limit    = optional(string, "2")
+    memory_limit = optional(string, "2Gi")
+    min_scale    = optional(number, 0)
+    max_scale    = optional(number, 20)
+    concurrency  = optional(number, 50)
+    timeout      = optional(string, "300s")
+  })
+  default = {}
+}
+
+# Storage Configuration
+variable "storage_location" {
+  description = "Cloud Storage bucket location"
+  type        = string
+  default     = "US"
+}
+
+variable "storage_lifecycle_days" {
+  description = "Days after which objects are deleted from storage"
   type        = number
   default     = 30
+}
+
+# Security Configuration
+variable "allowed_cidr_blocks" {
+  description = "CIDR blocks allowed to access the application"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "enable_vpc_connector" {
+  description = "Enable VPC connector for Cloud Run services"
+  type        = bool
+  default     = false
+}
+
+# Cloud Build Configuration
+variable "github_repo" {
+  description = "GitHub repository for Cloud Build triggers"
+  type = object({
+    owner = string
+    name  = string
+  })
+  default = null
+}
+
+variable "build_trigger_branches" {
+  description = "Git branches that trigger builds"
+  type        = list(string)
+  default     = ["main", "master"]
+}
+
+# Monitoring and Alerting
+variable "enable_monitoring" {
+  description = "Enable Cloud Monitoring and alerting"
+  type        = bool
+  default     = true
+}
+
+variable "notification_email" {
+  description = "Email for monitoring notifications"
+  type        = string
+  default     = null
+}
+
+# Cost Control
+variable "budget_amount" {
+  description = "Monthly budget limit in USD"
+  type        = number
+  default     = 100
+}
+
+variable "enable_budget_alerts" {
+  description = "Enable budget alerts"
+  type        = bool
+  default     = true
 }
