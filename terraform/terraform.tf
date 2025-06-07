@@ -24,12 +24,12 @@ terraform {
 
 # Provider di default
 provider "google" {
-  # Il project viene impostato tramite variabile
-  region = var.region
+  project = var.project_id
+  region  = var.region
 }
 
-# Provider beta per funzionalità avanzate (se necessario)
+# Provider beta per funzionalità avanzate (se necessario)  
 provider "google-beta" {
-  # Il project viene impostato tramite variabile
-  region = var.region
+  project = var.project_id
+  region  = var.region
 }

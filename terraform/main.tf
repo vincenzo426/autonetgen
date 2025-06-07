@@ -1,21 +1,5 @@
 # main.tf - Configurazione principale per autonetgen su Google Cloud Platform
 
-# Provider Google Cloud
-terraform {
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
-  }
-  required_version = ">= 1.0"
-}
-
-provider "google" {
-  project = var.project_id
-  region  = var.region
-}
-
 # Abilita le API necessarie
 resource "google_project_service" "required_apis" {
   for_each = toset([
