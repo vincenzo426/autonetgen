@@ -1,0 +1,40 @@
+# Backend Dockerfile
+FROM python:3.11-slim
+
+# Imposta la directory di lavoro
+WORKDIR /app
+
+# Installa dipendenze di sistema necessarie
+RUN apt-get update && apt-get install -y \
+    graphviz \
+    graphviz-dev \
+    pkg-config \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copia i requirements
+COPY backend/requirements.txt .
+
+# Installa le dipendenze Python
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copia il codice sorgente del backend
+COPY backend/ .
+
+# Crea le directory necessarie
+RUN mkdir -p uploads output temp
+
+# Esponi la porta 8080 (requirement di Cloud Run)
+EXPOSE 8080
+
+# Imposta le variabili di ambiente
+ENV FLASK_APP=app.py
+ENV FLASK_ENV=production
+ENV PORT=8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Avvia l'applicazione
+CMD ["python", "app.py"]
