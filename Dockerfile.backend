@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
 
 # Copia i requirements
 COPY backend/requirements.txt .
+COPY app.py .
 
 # Installa le dipendenze Python
 RUN pip install --no-cache-dir -r requirements.txt
