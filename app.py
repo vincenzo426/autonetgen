@@ -52,7 +52,6 @@ def root():
 # Importa e registra gli endpoint dell'API esistente
 try:
     from api import app as api_app
-    
     # Copia le routes dall'app API esistente
     for rule in api_app.url_map.iter_rules():
         if rule.endpoint != 'static':

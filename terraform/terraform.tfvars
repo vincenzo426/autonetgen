@@ -3,13 +3,13 @@
 
 # === CONFIGURAZIONE OBBLIGATORIA ===
 # ID del tuo progetto Google Cloud Platform
-project_id = "il-tuo-project-id"
+project_id = "gruppo-10"
 
 # === CONFIGURAZIONE IMMAGINI DOCKER ===
 # Personalizza questi URL dopo aver costruito e caricato le immagini
 # Formato: gcr.io/PROJECT_ID/IMAGE_NAME:TAG
-frontend_image_url = "gcr.io/il-tuo-project-id/autonetgen-frontend:latest"
-backend_image_url  = "gcr.io/il-tuo-project-id/autonetgen-backend:latest"
+frontend_image_url = "gcr.io/gruppo-10/autonetgen-frontend:latest"
+backend_image_url  = "gcr.io/gruppo-10/autonetgen-backend:latest"
 
 # === CONFIGURAZIONE REGIONALE ===
 # Scegli la regione più vicina per ridurre latenza e costi

@@ -65,6 +65,7 @@ resource "google_cloud_run_service" "backend" {
       
       # Configurazione economica
       container_concurrency = 10
+      timeout_seconds       = 300
       
       containers {
         image = var.backend_image_url
@@ -74,10 +75,6 @@ resource "google_cloud_run_service" "backend" {
         }
         
         # Variabili di ambiente
-        env {
-          name  = "PORT"
-          value = "8080"
-        }
         
         env {
           name  = "GOOGLE_CLOUD_PROJECT"
