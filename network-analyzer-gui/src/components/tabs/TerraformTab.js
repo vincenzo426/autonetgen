@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import TerraformViewer from '../terraform/TerraformViewer';
 import DeployControls from '../terraform/DeployControls';
+import TrafficTestControls from '../terraform/TrafficTestControls';
 
 /**
  * Componente per la scheda che mostra e permette di modificare i file Terraform
@@ -13,8 +14,8 @@ import DeployControls from '../terraform/DeployControls';
  * @param {Function} props.onNotify - Handler per mostrare notifiche
  * @param {Function} props.onToggleCloud - Handler per attivare/disattivare la connessione al cloud
  */
-const TerraformTab = ({ results, isCloudConnected, onNotify,onToggleCloud }) => {
-  const [selectedSection, setSelectedSection] = useState('files'); // files, deploy
+const TerraformTab = ({ results, isCloudConnected, onNotify, onToggleCloud }) => {
+  const [selectedSection, setSelectedSection] = useState('files'); // files, deploy, testing
   
   if (!results || !results.output_paths || !results.output_paths.terraform) {
     return (
@@ -29,9 +30,9 @@ const TerraformTab = ({ results, isCloudConnected, onNotify,onToggleCloud }) => 
 
   return (
     <div className="h-[calc(100vh-16rem)]">
-      <h2 className="text-2xl font-bold mb-4">Terraform Configuration</h2>
+      <h2 className="text-2xl font-bold mb-4">Infrastructure Management</h2>
       <p className="text-gray-600 mb-4">
-        View, edit, and deploy your generated Terraform infrastructure on Google Cloud Platform.
+        Manage your Terraform infrastructure configuration, deployment, and traffic testing.
       </p>
       
       {/* Tabs per selezionare la sezione */}
@@ -57,23 +58,43 @@ const TerraformTab = ({ results, isCloudConnected, onNotify,onToggleCloud }) => 
           >
             Deploy Infrastructure
           </button>
+          <button
+            className={`py-2 px-4 font-medium text-sm focus:outline-none ${
+              selectedSection === 'testing' 
+                ? 'text-blue-600 border-b-2 border-blue-600' 
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+            onClick={() => setSelectedSection('testing')}
+          >
+            Traffic Testing
+          </button>
         </nav>
       </div>
       
       {/* Contenuto in base alla sezione selezionata */}
-      {selectedSection === 'files' ? (
+      {selectedSection === 'files' && (
         <div className="h-[calc(100%-10rem)]">
           <TerraformViewer 
             terraformPath={results.output_paths.terraform} 
             onNotify={onNotify} 
           />
         </div>
-      ) : (
+      )}
+      
+      {selectedSection === 'deploy' && (
         <DeployControls 
           terraformPath={results.output_paths.terraform} 
           onNotify={onNotify}
           isCloudConnected={isCloudConnected}
           onToggleCloud={onToggleCloud}
+        />
+      )}
+      
+      {selectedSection === 'testing' && (
+        <TrafficTestControls 
+          terraformPath={results.output_paths.terraform}
+          analysisResults={results}
+          onNotify={onNotify}
         />
       )}
     </div>
