@@ -47,20 +47,6 @@ resource "google_storage_bucket" "autonetgen_storage" {
   depends_on = [google_project_service.required_apis]
 }
 
-# Service Account per Cloud Run
-resource "google_service_account" "autonetgen_sa" {
-  account_id   = "autonetgen-service"
-  display_name = "AutoNetGen Service Account"
-  description  = "Service account per l'applicazione AutoNetGen"
-}
-
-# Permessi per il service account
-resource "google_project_iam_member" "storage_admin" {
-  project = var.project_id
-  role    = "roles/storage.admin"
-  member  = "serviceAccount:${google_service_account.autonetgen_sa.email}"
-}
-
 resource "google_project_iam_member" "logging_writer" {
   project = var.project_id
   role    = "roles/logging.logWriter"
