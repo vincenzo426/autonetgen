@@ -1,7 +1,7 @@
 // src/services/apiService.js
 
 const API_URL =
-  "https://autonetgen-frontend-744895722272.europe-west1.run.app/api";
+  "https://autonetgen-backend-744895722272.europe-west1.run.app/api";
 
 /**
  * Servizio per comunicare con il backend API
