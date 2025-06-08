@@ -12,6 +12,7 @@ RUN npm ci --only=production
 
 # Copia il codice sorgente
 COPY network-analyzer-gui/ .
+COPY app.py .
 
 # Build dell'applicazione per la produzione
 RUN npm run build

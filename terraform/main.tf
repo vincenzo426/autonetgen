@@ -54,7 +54,14 @@ resource "google_service_account" "autonetgen_sa" {
   description  = "Service account per l'applicazione AutoNetGen"
 }
 
-# Cloud Run service per il backend
+# Permessi per il service account per accedere al bucket
+resource "google_storage_bucket_iam_member" "autonetgen_sa_storage" {
+  bucket = google_storage_bucket.autonetgen_storage.name
+  role   = "roles/storage.admin"
+  member = "serviceAccount:${google_service_account.autonetgen_sa.email}"
+}
+
+# Cloud Run service per il backend (PRIVATO)
 resource "google_cloud_run_service" "backend" {
   name     = "autonetgen-backend"
   location = var.region
@@ -144,13 +151,31 @@ resource "google_cloud_run_service" "backend" {
   depends_on = [google_project_service.required_apis]
 }
 
-# Cloud Run service per il frontend
+# Service Account per il frontend
+resource "google_service_account" "frontend_sa" {
+  account_id   = "autonetgen-frontend"
+  display_name = "AutoNetGen Frontend Service Account"
+  description  = "Service account per il frontend AutoNetGen"
+}
+
+# Permesso per il frontend di invocare il backend
+resource "google_cloud_run_service_iam_member" "frontend_invoke_backend" {
+  location = google_cloud_run_service.backend.location
+  project  = google_cloud_run_service.backend.project
+  service  = google_cloud_run_service.backend.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.frontend_sa.email}"
+}
+
+# Cloud Run service per il frontend (PUBBLICO)
 resource "google_cloud_run_service" "frontend" {
   name     = "autonetgen-frontend"
   location = var.region
   
   template {
     spec {
+      service_account_name = google_service_account.frontend_sa.email
+      
       containers {
         image = var.frontend_image_url
         
@@ -167,12 +192,12 @@ resource "google_cloud_run_service" "frontend" {
         # Configurazione risorse economica
         resources {
           limits = {
-            cpu    = "0.5"
-            memory = "512Mi"
+            cpu    = var.cpu_limit
+            memory = var.memory_limit
           }
           requests = {
-            cpu    = "0.25"
-            memory = "256Mi"
+            cpu    = var.cpu_limit
+            memory = var.memory_limit
           }
         }
       }
@@ -195,15 +220,7 @@ resource "google_cloud_run_service" "frontend" {
   depends_on = [google_project_service.required_apis]
 }
 
-# Policy IAM per permettere l'accesso pubblico ai servizi Cloud Run
-resource "google_cloud_run_service_iam_policy" "backend_public" {
-  location = google_cloud_run_service.backend.location
-  project  = google_cloud_run_service.backend.project
-  service  = google_cloud_run_service.backend.name
-  
-  policy_data = data.google_iam_policy.public_access.policy_data
-}
-
+# Policy IAM per permettere l'accesso pubblico SOLO al frontend
 resource "google_cloud_run_service_iam_policy" "frontend_public" {
   location = google_cloud_run_service.frontend.location
   project  = google_cloud_run_service.frontend.project
@@ -220,4 +237,15 @@ data "google_iam_policy" "public_access" {
       "allUsers"
     ]
   }
+}
+
+# Output degli URL
+output "frontend_url" {
+  description = "URL del frontend (pubblico)"
+  value       = google_cloud_run_service.frontend.status[0].url
+}
+
+output "backend_url" {
+  description = "URL del backend (privato, solo per riferimento)"
+  value       = google_cloud_run_service.backend.status[0].url
 }
