@@ -300,7 +300,11 @@ def health_check():
     """
     Endpoint per verificare lo stato del servizio
     """
-    return jsonify({'status': 'ok', 'message': 'Servizio attivo'})
+    return jsonify({
+        'status': 'healthy',
+        'service': 'network-analyzer-backend',
+        'timestamp': str(os.environ.get('K_REVISION', 'unknown'))
+    }), 200
 
 def determine_terraform_file_type(file_name, file_path):
     """
