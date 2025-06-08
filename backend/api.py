@@ -17,7 +17,7 @@ from terraform_manager import TerraformManager
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB
-CORS(app)  # Permette chiamate da frontend React
+CORS(app, origins=["*"])  # Permette chiamate da frontend React
 
 # Configura una directory per i file temporanei
 UPLOAD_FOLDER = tempfile.mkdtemp()
