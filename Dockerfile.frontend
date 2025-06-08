@@ -12,7 +12,6 @@ RUN npm ci --only=production
 
 # Copia il codice sorgente
 COPY network-analyzer-gui/ .
-COPY app.py .
 
 # Build dell'applicazione per la produzione
 RUN npm run build
@@ -28,8 +27,6 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Esponi la porta 8080 (requirement di Cloud Run)
 EXPOSE 8080
-
-RUN ls && pwd
 
 # Avvia nginx
 CMD ["nginx", "-g", "daemon off;"]
