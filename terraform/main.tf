@@ -110,7 +110,7 @@ resource "google_cloud_run_service" "backend" {
         # Startup probe per evitare timeout
         startup_probe {
           http_get {
-            path = "/health"
+            path = "/api/health"
             port = 8080
           }
           initial_delay_seconds = 10
@@ -122,7 +122,7 @@ resource "google_cloud_run_service" "backend" {
         # Liveness probe
         liveness_probe {
           http_get {
-            path = "/health"
+            path = "/api/health"
             port = 8080
           }
           initial_delay_seconds = 30
