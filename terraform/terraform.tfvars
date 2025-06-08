@@ -40,6 +40,8 @@ enable_monitoring = false
 # === CONFIGURAZIONE DOMINIO (OPZIONALE) ===
 # domain_name = "autonetgen.tuodominio.com"
 
+enable_public_access = true
+
 # === LABELS PER GESTIONE RISORSE ===
 labels = {
   project     = "autonetgen"

@@ -234,7 +234,7 @@ data "google_iam_policy" "public_access" {
   binding {
     role = "roles/run.invoker"
     members = [
-      "allUsers"
+      "allAuthenticatedUsers"
     ]
   }
 }
