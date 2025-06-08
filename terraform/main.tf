@@ -238,14 +238,3 @@ data "google_iam_policy" "public_access" {
     ]
   }
 }
-
-# Output degli URL
-output "frontend_url" {
-  description = "URL del frontend (pubblico)"
-  value       = google_cloud_run_service.frontend.status[0].url
-}
-
-output "backend_url" {
-  description = "URL del backend (privato, solo per riferimento)"
-  value       = google_cloud_run_service.backend.status[0].url
-}
