@@ -222,6 +222,7 @@ resource "google_cloud_run_service" "frontend" {
 
 # SOLUZIONE 1: Accesso pubblico per utenti autenticati (RACCOMANDATO)
 # Questo permette l'accesso a chiunque abbia un account Google
+/*
 resource "google_cloud_run_service_iam_member" "frontend_authenticated_users" {
   count    = var.enable_public_access ? 1 : 0
   location = google_cloud_run_service.frontend.location
@@ -230,7 +231,7 @@ resource "google_cloud_run_service_iam_member" "frontend_authenticated_users" {
   role     = "roles/run.invoker"
   member   = "allAuthenticatedUsers"
 }
-
+*/
 # SOLUZIONE 2: Accesso per domini specifici (ALTERNATIVA SICURA)
 # Decommentare e personalizzare se si vuole limitare l'accesso a domini specifici
 /*
