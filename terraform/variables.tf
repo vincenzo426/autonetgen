@@ -98,40 +98,73 @@ variable "memory_limit" {
 }
 
 variable "storage_retention_days" {
-  description = "Numero di giorni per mantenere i file nel bucket (per controllare i costi)"
+  description = "Giorni di retention per i file nel bucket"
   type        = number
   default     = 30
   
   validation {
     condition     = var.storage_retention_days >= 1 && var.storage_retention_days <= 365
-    error_message = "La retention deve essere tra 1 e 365 giorni."
+    error_message = "I giorni di retention devono essere tra 1 e 365."
   }
 }
 
-variable "domain_name" {
-  description = "Nome di dominio personalizzato per il frontend (opzionale)"
-  type        = string
-  default     = ""
-}
-
 variable "enable_https_redirect" {
-  description = "Forza il redirect HTTPS (raccomandato per produzione)"
+  description = "Abilita il redirect automatico da HTTP a HTTPS"
   type        = bool
   default     = true
 }
 
 variable "cors_origins" {
-  description = "Lista di origini permesse per CORS"
+  description = "Origini CORS consentite per il bucket storage"
   type        = list(string)
   default     = ["*"]
 }
 
 variable "labels" {
-  description = "Labels da applicare a tutte le risorse"
+  description = "Labels da applicare alle risorse"
   type        = map(string)
   default = {
     project     = "autonetgen"
     managed_by  = "terraform"
-    cost_center = "development"
   }
+}
+
+# === NUOVE VARIABILI PER CONTROLLO ACCESSO ===
+
+variable "enable_public_access" {
+  description = "Abilita l'accesso pubblico al frontend (per utenti autenticati Google)"
+  type        = bool
+  default     = true
+}
+
+variable "authorized_domains" {
+  description = "Domini autorizzati ad accedere al frontend (es: ['example.com', 'company.org'])"
+  type        = list(string)
+  default     = []
+  
+  validation {
+    condition = alltrue([
+      for domain in var.authorized_domains : can(regex("^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", domain))
+    ])
+    error_message = "Tutti i domini devono essere nel formato valido (es: example.com)."
+  }
+}
+
+variable "authorized_users" {
+  description = "Lista di utenti/gruppi autorizzati (es: ['user:nome@gmail.com', 'group:team@company.com'])"
+  type        = list(string)
+  default     = []
+  
+  validation {
+    condition = alltrue([
+      for user in var.authorized_users : can(regex("^(user:|group:|serviceAccount:).+", user))
+    ])
+    error_message = "Gli utenti devono essere nel formato: user:email@domain.com, group:group@domain.com, o serviceAccount:account@project.iam.gserviceaccount.com"
+  }
+}
+
+variable "domain_name" {
+  description = "Nome dominio personalizzato (opzionale)"
+  type        = string
+  default     = ""
 }

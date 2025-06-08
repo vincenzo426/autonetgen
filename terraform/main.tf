@@ -167,7 +167,7 @@ resource "google_cloud_run_service_iam_member" "frontend_invoke_backend" {
   member   = "serviceAccount:${google_service_account.frontend_sa.email}"
 }
 
-# Cloud Run service per il frontend (PUBBLICO)
+# Cloud Run service per il frontend
 resource "google_cloud_run_service" "frontend" {
   name     = "autonetgen-frontend"
   location = var.region
@@ -220,21 +220,38 @@ resource "google_cloud_run_service" "frontend" {
   depends_on = [google_project_service.required_apis]
 }
 
-# Policy IAM per permettere l'accesso pubblico SOLO al frontend
-resource "google_cloud_run_service_iam_policy" "frontend_public" {
+# SOLUZIONE 1: Accesso pubblico per utenti autenticati (RACCOMANDATO)
+# Questo permette l'accesso a chiunque abbia un account Google
+resource "google_cloud_run_service_iam_member" "frontend_authenticated_users" {
+  count    = var.enable_public_access ? 1 : 0
   location = google_cloud_run_service.frontend.location
   project  = google_cloud_run_service.frontend.project
   service  = google_cloud_run_service.frontend.name
-  
-  policy_data = data.google_iam_policy.public_access.policy_data
+  role     = "roles/run.invoker"
+  member   = "allAuthenticatedUsers"
 }
 
-# Policy per accesso pubblico
-data "google_iam_policy" "public_access" {
-  binding {
-    role = "roles/run.invoker"
-    members = [
-      "allAuthenticatedUsers"
-    ]
-  }
+# SOLUZIONE 2: Accesso per domini specifici (ALTERNATIVA SICURA)
+# Decommentare e personalizzare se si vuole limitare l'accesso a domini specifici
+/*
+resource "google_cloud_run_service_iam_member" "frontend_domain_users" {
+  count    = length(var.authorized_domains)
+  location = google_cloud_run_service.frontend.location
+  project  = google_cloud_run_service.frontend.project
+  service  = google_cloud_run_service.frontend.name
+  role     = "roles/run.invoker"
+  member   = "domain:${var.authorized_domains[count.index]}"
+}
+*/
+
+# SOLUZIONE 3: Accesso per utenti/gruppi specifici (MASSIMA SICUREZZA)
+# Decommentare e personalizzare per utenti specifici
+
+resource "google_cloud_run_service_iam_member" "frontend_specific_users" {
+  count    = length(var.authorized_users)
+  location = google_cloud_run_service.frontend.location
+  project  = google_cloud_run_service.frontend.project
+  service  = google_cloud_run_service.frontend.name
+  role     = "roles/run.invoker"
+  member   = var.authorized_users[count.index]
 }
