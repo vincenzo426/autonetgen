@@ -71,6 +71,41 @@ const apiService = {
   },
 
   /**
+   * Upload di file grandi con chunks
+   */
+  uploadLargeFile: async (file, onProgress) => {
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+    const chunks = Math.ceil(file.size / CHUNK_SIZE);
+
+    for (let i = 0; i < chunks; i++) {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk = file.slice(start, end);
+
+      const formData = new FormData();
+      formData.append("chunk", chunk);
+      formData.append("chunkNumber", i);
+      formData.append("totalChunks", chunks);
+      formData.append("filename", file.name);
+
+      const response = await fetch(`${API_URL}/upload-large`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Chunk ${i} upload failed`);
+      }
+
+      if (onProgress) {
+        onProgress(((i + 1) / chunks) * 100);
+      }
+    }
+
+    return { status: "success", message: "File uploaded successfully" };
+  },
+
+  /**
    * Scarica un file dal server
    * @param {string} fileType - Tipo di file da scaricare (graph, analysis, terraform)
    * @param {string} filePath - Percorso del file sul server

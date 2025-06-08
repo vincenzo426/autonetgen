@@ -350,6 +350,40 @@ def determine_terraform_file_type(file_name, file_path):
     # Tipo predefinito se non è possibile determinarlo
     return 'configuration'
 
+@app.route('/api/upload-large', methods=['POST'])
+def upload_large_file():
+    """Endpoint per upload di file grandi con chunks"""
+    try:
+        chunk = request.files.get('chunk')
+        chunk_number = int(request.form.get('chunkNumber', 0))
+        total_chunks = int(request.form.get('totalChunks', 1))
+        filename = request.form.get('filename')
+        
+        # Salva il chunk
+        chunk_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'chunks')
+        os.makedirs(chunk_dir, exist_ok=True)
+        
+        chunk_path = os.path.join(chunk_dir, f"{filename}.part{chunk_number}")
+        chunk.save(chunk_path)
+        
+        # Se è l'ultimo chunk, ricomponi il file
+        if chunk_number == total_chunks - 1:
+            final_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            with open(final_path, 'wb') as final_file:
+                for i in range(total_chunks):
+                    chunk_file = os.path.join(chunk_dir, f"{filename}.part{i}")
+                    with open(chunk_file, 'rb') as chunk_data:
+                        final_file.write(chunk_data.read())
+                    os.remove(chunk_file)
+            
+            return jsonify({'status': 'complete', 'filepath': final_path})
+        
+        return jsonify({'status': 'chunk_received'})
+        
+    except Exception as e:
+        logger.error(f"Errore upload chunk: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 # Aggiungi questi endpoint nella classe Flask dell'API
 @app.route('/api/terraform/init', methods=['POST'])
 def terraform_init():
