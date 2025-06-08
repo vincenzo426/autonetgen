@@ -16,6 +16,7 @@ from config import logger, DEFAULT_OUTPUT_DIR
 from terraform_manager import TerraformManager
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB
 CORS(app)  # Permette chiamate da frontend React
 
 # Configura una directory per i file temporanei
