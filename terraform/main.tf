@@ -102,8 +102,8 @@ resource "google_cloud_run_service" "backend" {
             memory = var.memory_limit
           }
           requests = {
-            cpu    = "0.5"
-            memory = "512Mi"
+            cpu    = var.cpu_limit
+            memory = var.memory_limit
           }
         }
         
