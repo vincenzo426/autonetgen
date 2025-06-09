@@ -8,7 +8,8 @@ resource "google_project_service" "required_apis" {
     "storage-api.googleapis.com",
     "storage-component.googleapis.com",
     "logging.googleapis.com",
-    "monitoring.googleapis.com"
+    "monitoring.googleapis.com",
+    "pubsub.googleapis.com"  # AGGIUNTA per notifiche storage
   ])
   
   service = each.value
@@ -27,18 +28,18 @@ resource "google_storage_bucket" "autonetgen_storage" {
   # Gestione del lifecycle per ridurre i costi
   lifecycle_rule {
     condition {
-      age = 30
+      age = var.storage_retention_days
     }
     action {
       type = "Delete"
     }
   }
   
-  # CORS per permettere uploads dal frontend
+  # CORS aggiornato per permettere upload diretto dal frontend
   cors {
     origin          = ["*"]
-    method          = ["GET", "POST", "PUT", "DELETE"]
-    response_header = ["*"]
+    method          = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    response_header = ["Content-Type", "Authorization", "Content-Length", "User-Agent", "X-Requested-With"]
     max_age_seconds = 3600
   }
   
@@ -61,6 +62,13 @@ resource "google_storage_bucket_iam_member" "autonetgen_sa_storage" {
   member = "serviceAccount:${google_service_account.autonetgen_sa.email}"
 }
 
+# Permessi per il service account di gestire Pub/Sub
+resource "google_project_iam_member" "autonetgen_pubsub" {
+  project = var.project_id
+  role    = "roles/pubsub.subscriber"
+  member  = "serviceAccount:${google_service_account.autonetgen_sa.email}"
+}
+
 # Cloud Run service per il backend (PRIVATO)
 resource "google_cloud_run_service" "backend" {
   name     = "autonetgen-backend"
@@ -80,6 +88,7 @@ resource "google_cloud_run_service" "backend" {
           container_port = 8080
         }
         
+        # Variabili di ambiente aggiornate per storage e Pub/Sub
         env {
           name  = "GOOGLE_CLOUD_PROJECT"
           value = var.project_id
@@ -88,6 +97,16 @@ resource "google_cloud_run_service" "backend" {
         env {
           name  = "STORAGE_BUCKET"
           value = google_storage_bucket.autonetgen_storage.name
+        }
+        
+        env {
+          name  = "STORAGE_BUCKET_NAME"
+          value = google_storage_bucket.autonetgen_storage.name
+        }
+        
+        env {
+          name  = "PUBSUB_TOPIC"
+          value = "autonetgen-file-uploads"
         }
         
         env {

@@ -4,6 +4,116 @@ const API_URL =
   "https://autonetgen-backend-744895722272.europe-west1.run.app/api";
 
 /**
+ * Ottiene un signed URL per l'upload diretto su Cloud Storage
+ * @param {string} filename - Nome del file da caricare
+ * @returns {Promise<Object>} - Oggetto con le informazioni per l'upload
+ */
+const getUploadUrl = async (filename) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/upload-url`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ filename }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error getting upload URL:", error);
+    throw new Error(`Failed to get upload URL: ${error.message}`);
+  }
+};
+
+/**
+ * Lista i file caricati su Cloud Storage
+ * @returns {Promise<Object>} - Lista dei file caricati
+ */
+const listUploadedFiles = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/files`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error listing files:", error);
+    throw new Error(`Failed to list files: ${error.message}`);
+  }
+};
+
+/**
+ * Avvia l'analisi di un file già caricato su Cloud Storage
+ * @param {string} blobName - Nome del blob su Cloud Storage
+ * @param {Object} options - Opzioni aggiuntive per l'analisi
+ * @returns {Promise<Object>} - Risultato dell'analisi
+ */
+const analyzeStorageFile = async (blobName, options = {}) => {
+  try {
+    const formData = new FormData();
+    formData.append("blob_name", blobName);
+
+    // Aggiungi opzioni aggiuntive se fornite
+    Object.keys(options).forEach((key) => {
+      formData.append(key, options[key]);
+    });
+
+    const response = await fetch(`${API_BASE_URL}/api/analyze`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error analyzing storage file:", error);
+    throw new Error(`Failed to analyze file: ${error.message}`);
+  }
+};
+
+/**
+ * Ottiene i risultati dell'analisi di un file
+ * @param {string} fileId - ID del file analizzato
+ * @returns {Promise<Object>} - Risultati dell'analisi
+ */
+const getAnalysisResults = async (fileId) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/results/${fileId}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error getting analysis results:", error);
+    throw new Error(`Failed to get analysis results: ${error.message}`);
+  }
+};
+/**
  * Servizio per comunicare con il backend API
  */
 const apiService = {
@@ -32,8 +142,17 @@ const apiService = {
    */
   analyzeFiles: async (files, options) => {
     try {
+      // Se è una stringa, assume che sia un blob_name
+      if (typeof filesOrBlobName === "string") {
+        return await analyzeStorageFile(filesOrBlobName, options);
+      }
       // Creazione del FormData per inviare i file
       const formData = new FormData();
+
+      // Aggiungi i file
+      filesOrBlobName.forEach((file, index) => {
+        formData.append(`file${index}`, file);
+      });
 
       // Aggiungi i file
       files.forEach((file, index) => {

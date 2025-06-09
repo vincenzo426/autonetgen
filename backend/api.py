@@ -14,9 +14,13 @@ from collections import Counter
 from analysis_orchestrator import AnalysisOrchestrator
 from config import logger, DEFAULT_OUTPUT_DIR
 from terraform_manager import TerraformManager
+from storage_api import add_storage_endpoints
 
 app = Flask(__name__)
 CORS(app, origins=["*"])  # Permette chiamate da frontend React
+
+# Aggiungi endpoint per gestione storage
+add_storage_endpoints(app)
 
 # Imposta il limite massimo di dimensione del file (500 MB)
 app.config['MAX_CONTENT_LENGTH'] = 1000 * 1024 * 1024  # 1 GB
@@ -38,21 +42,39 @@ def request_entity_too_large(error):
 def analyze():
     """
     Endpoint per avviare l'analisi dei file di rete
-    Accetta file caricati e parametri di configurazione
+    Supporta sia upload diretto che file già su storage
     """
     try:
-        # Estrai i file caricati
-        uploaded_files = []
-        for key in request.files:
-            file = request.files[key]
-            if file.filename:
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                uploaded_files.append(filepath)
+        # Verifica se è stato fornito un blob_name (file già su storage)
+        blob_name = request.form.get('blob_name') or request.json.get('blob_name') if request.is_json else None
         
-        if not uploaded_files:
-            return jsonify({'status': 'error', 'message': 'Nessun file caricato'}), 400
+        if blob_name:
+            # File già su storage - processo diretto
+            logger.info(f"Processamento file da storage: {blob_name}")
+            
+            from storage_api import process_uploaded_file
+            result = process_uploaded_file(blob_name)
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Analisi completata',
+                'data': result
+            })
+        
+        else:
+            # CODICE ESISTENTE per upload diretto (mantenuto per retrocompatibilità)
+            # Estrai i file caricati
+            uploaded_files = []
+            for key in request.files:
+                file = request.files[key]
+                if file.filename:
+                    filename = secure_filename(file.filename)
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    uploaded_files.append(filepath)
+            
+            if not uploaded_files:
+                return jsonify({'status': 'error', 'message': 'Nessun file caricato'}), 400
         
         # Estrai i parametri
         file_type = request.form.get('type', 'auto')
