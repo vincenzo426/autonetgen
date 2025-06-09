@@ -10,7 +10,7 @@ const API_URL =
  */
 const getUploadUrl = async (filename) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/upload-url`, {
+    const response = await fetch(`${API_URL}/upload-url`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -36,7 +36,7 @@ const getUploadUrl = async (filename) => {
  */
 const listUploadedFiles = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/files`, {
+    const response = await fetch(`${API_URL}/files`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
@@ -71,7 +71,7 @@ const analyzeStorageFile = async (blobName, options = {}) => {
       formData.append(key, options[key]);
     });
 
-    const response = await fetch(`${API_BASE_URL}/api/analyze`, {
+    const response = await fetch(`${API_URL}/analyze`, {
       method: "POST",
       body: formData,
     });
@@ -95,7 +95,7 @@ const analyzeStorageFile = async (blobName, options = {}) => {
  */
 const getAnalysisResults = async (fileId) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/results/${fileId}`, {
+    const response = await fetch(`${API_URL}/results/${fileId}`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
@@ -143,14 +143,14 @@ const apiService = {
   analyzeFiles: async (files, options) => {
     try {
       // Se è una stringa, assume che sia un blob_name
-      if (typeof filesOrBlobName === "string") {
-        return await analyzeStorageFile(filesOrBlobName, options);
+      if (typeof files === "string") {
+        return await analyzeStorageFile(files, options);
       }
       // Creazione del FormData per inviare i file
       const formData = new FormData();
 
       // Aggiungi i file
-      filesOrBlobName.forEach((file, index) => {
+      files.forEach((file, index) => {
         formData.append(`file${index}`, file);
       });
 

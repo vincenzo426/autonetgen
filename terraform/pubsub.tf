@@ -61,10 +61,3 @@ resource "google_pubsub_topic_iam_member" "storage_publish" {
   role   = "roles/pubsub.publisher"
   member = "serviceAccount:${data.google_storage_project_service_account.gcs_account.email_address}"
 }
-
-# Permessi per il service account di gestire Pub/Sub
-resource "google_project_iam_member" "autonetgen_pubsub" {
-  project = var.project_id
-  role    = "roles/pubsub.subscriber"
-  member  = "serviceAccount:${google_service_account.autonetgen_sa.email}"
-}
