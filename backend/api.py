@@ -25,14 +25,6 @@ app.config['MAX_CONTENT_LENGTH'] = 1000 * 1024 * 1024  # 1 GB
 UPLOAD_FOLDER = tempfile.mkdtemp()
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-@app.errorhandler(RequestEntityTooLarge)
-def handle_file_too_large(e):
-    """Gestisce l'errore quando il file è troppo grande"""
-    return jsonify({
-        'status': 'error',
-        'message': f'File troppo grande. La dimensione massima consentita è {app.config["MAX_CONTENT_LENGTH"] // (1024*1024)} MB.'
-    }), 413
-
 @app.errorhandler(413)
 def request_entity_too_large(error):
     """Gestisce l'errore 413"""
