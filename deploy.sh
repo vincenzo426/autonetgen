@@ -99,14 +99,14 @@ build_and_push_images() {
     
     # Build backend
     print_message "Building backend image..."
-    docker build -t gcr.io/$PROJECT_ID/autonetgen-backend:latest -f Dockerfile.backend .
+    docker build --no-cache -t gcr.io/$PROJECT_ID/autonetgen-backend:latest -f Dockerfile.backend .
     
     print_message "Pushing backend image..."
     docker push gcr.io/$PROJECT_ID/autonetgen-backend:latest
     
     # Build frontend
     print_message "Building frontend image..."
-    docker build -t gcr.io/$PROJECT_ID/autonetgen-frontend:latest -f Dockerfile.frontend .
+    docker build --no-cache -t gcr.io/$PROJECT_ID/autonetgen-frontend:latest -f Dockerfile.frontend .
     
     print_message "Pushing frontend image..."
     docker push gcr.io/$PROJECT_ID/autonetgen-frontend:latest
