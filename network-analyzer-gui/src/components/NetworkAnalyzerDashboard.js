@@ -17,25 +17,26 @@ export default function NetworkAnalyzerDashboard() {
   // Stati per la gestione delle schede e dei file
   const [activeTab, setActiveTab] = useState("upload");
   const [uploadedFiles, setUploadedFiles] = useState([]);
-  
+
   // Stati per l'analisi e i risultati
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResults, setAnalysisResults] = useState(null);
+  const [fileSize, setFileSize] = useState(null);
   const [analysisConfig, setAnalysisConfig] = useState({
     parserType: "auto",
     outputFormats: {
       graphviz: true,
       terraform: true,
-      json: true
+      json: true,
     },
     outputPaths: {
       output_dir: "output",
       output_graph: "output/network_graph.pdf",
-      output_analysis: "output/network_analysis.json", 
-      output_terraform: "output/terraform"
-    }
+      output_analysis: "output/network_analysis.json",
+      output_terraform: "output/terraform",
+    },
   });
-  
+
   // Stati per le connessioni e le notifiche
   const [isConnectedToCloud, setIsConnectedToCloud] = useState(false);
   const [isServerAvailable, setIsServerAvailable] = useState(false);
@@ -58,7 +59,10 @@ export default function NetworkAnalyzerDashboard() {
       addNotification("Connected to backend server", "success");
     } catch (error) {
       setIsServerAvailable(false);
-      addNotification("Backend server is not available. Some features will be simulated.", "error");
+      addNotification(
+        "Backend server is not available. Some features will be simulated.",
+        "error"
+      );
       console.error("Server connection error:", error);
     } finally {
       setIsCheckingServer(false);
@@ -70,9 +74,18 @@ export default function NetworkAnalyzerDashboard() {
    * @param {File[]} files - Array di file caricati
    */
   const handleFilesUploaded = (files) => {
+    const sizeInBytes = files[0].size;
+
     setUploadedFiles(files);
     if (files.length > 0) {
-      addNotification(`${files.length} file(s) uploaded successfully`, "success");
+      // Convert to MB
+      const sizeInMB = sizeInBytes / (1024 * 1024);
+      setFileSize(sizeInMB);
+      console.log(`File size: ${sizeInMB.toFixed(2)} MB `);
+      addNotification(
+        `${files.length} file(s) uploaded successfully`,
+        "success"
+      );
     }
   };
 
@@ -81,9 +94,9 @@ export default function NetworkAnalyzerDashboard() {
    * @param {Object} config - Nuova configurazione
    */
   const updateAnalysisConfig = (config) => {
-    setAnalysisConfig(prevConfig => ({
+    setAnalysisConfig((prevConfig) => ({
       ...prevConfig,
-      ...config
+      ...config,
     }));
   };
 
@@ -106,10 +119,10 @@ export default function NetworkAnalyzerDashboard() {
           output_dir: analysisConfig.outputPaths.output_dir,
           output_graph: analysisConfig.outputPaths.output_graph,
           output_analysis: analysisConfig.outputPaths.output_analysis,
-          output_terraform: analysisConfig.outputPaths.output_terraform
+          output_terraform: analysisConfig.outputPaths.output_terraform,
         });
-        
-        if (response.status === 'success') {
+
+        if (response.status === "success") {
           setAnalysisResults(response.results);
           console.log("Analysis results:", response.results);
           addNotification("Analysis completed successfully", "success");
@@ -174,15 +187,19 @@ export default function NetworkAnalyzerDashboard() {
    */
   const handleExport = async (type) => {
     addNotification(`Preparing ${type} export...`, "info");
-    
+
     try {
-      if (isServerAvailable && analysisResults && analysisResults.output_paths) {
+      if (
+        isServerAvailable &&
+        analysisResults &&
+        analysisResults.output_paths
+      ) {
         // Se il server è disponibile, scarica il file
         await apiService.downloadFile(type, analysisResults.output_paths[type]);
         addNotification(`${type} exported successfully`, "success");
       } else {
         // Simula un'esportazione
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
         addNotification(`${type} exported successfully (simulated)`, "success");
       }
     } catch (error) {
@@ -197,9 +214,9 @@ export default function NetworkAnalyzerDashboard() {
   const toggleCloudConnection = () => {
     setIsConnectedToCloud(!isConnectedToCloud);
     addNotification(
-      isConnectedToCloud ? 
-        "Disconnected from Google Cloud" : 
-        "Connected to Google Cloud", 
+      isConnectedToCloud
+        ? "Disconnected from Google Cloud"
+        : "Connected to Google Cloud",
       "info"
     );
   };
@@ -211,11 +228,11 @@ export default function NetworkAnalyzerDashboard() {
    */
   const addNotification = (message, type) => {
     const id = Date.now();
-    setNotifications(prev => [...prev, { id, message, type }]);
-    
+    setNotifications((prev) => [...prev, { id, message, type }]);
+
     // Rimuove automaticamente la notifica dopo 5 secondi
     setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
     }, 5000);
   };
 
@@ -224,7 +241,7 @@ export default function NetworkAnalyzerDashboard() {
    * @param {number} id - ID della notifica da rimuovere
    */
   const removeNotification = (id) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
   };
 
   /**
@@ -235,7 +252,8 @@ export default function NetworkAnalyzerDashboard() {
   const isTabDisabled = (tabName) => {
     if (tabName === "upload") return false;
     if (tabName === "analyze") return uploadedFiles.length === 0;
-    if (["results", "export", "terraform"].includes(tabName)) return !analysisResults;
+    if (["results", "export", "terraform"].includes(tabName))
+      return !analysisResults;
     return false;
   };
 
@@ -246,34 +264,29 @@ export default function NetworkAnalyzerDashboard() {
     switch (activeTab) {
       case "upload":
         return (
-          <UploadTab 
+          <UploadTab
             uploadedFiles={uploadedFiles}
             onFilesUploaded={handleFilesUploaded}
             onContinue={() => setActiveTab("analyze")}
           />
         );
-        
+
       case "analyze":
         return (
-          <AnalyzeTab 
+          <AnalyzeTab
             config={analysisConfig}
             onConfigChange={updateAnalysisConfig}
             onStartAnalysis={startAnalysis}
             isAnalyzing={isAnalyzing}
           />
         );
-        
+
       case "results":
-        return (
-          <ResultsTab 
-            results={analysisResults}
-            onExport={handleExport}
-          />
-        );
-        
+        return <ResultsTab results={analysisResults} onExport={handleExport} />;
+
       case "export":
         return (
-          <ExportTab 
+          <ExportTab
             results={analysisResults}
             isCloudConnected={isConnectedToCloud}
             onToggleCloud={toggleCloudConnection}
@@ -281,17 +294,17 @@ export default function NetworkAnalyzerDashboard() {
             onNotify={addNotification}
           />
         );
-        
+
       case "terraform":
         return (
-          <TerraformTab 
+          <TerraformTab
             results={analysisResults}
             isCloudConnected={isConnectedToCloud}
             onToggleCloud={toggleCloudConnection}
             onNotify={addNotification}
           />
         );
-        
+
       default:
         return null;
     }
@@ -300,8 +313,8 @@ export default function NetworkAnalyzerDashboard() {
   return (
     <div className="flex flex-col h-screen bg-gray-100">
       {/* Header dell'applicazione */}
-      <Header 
-        isCheckingServer={isCheckingServer} 
+      <Header
+        isCheckingServer={isCheckingServer}
         isServerAvailable={isServerAvailable}
         isConnectedToCloud={isConnectedToCloud}
         onToggleCloud={toggleCloudConnection}
@@ -310,14 +323,16 @@ export default function NetworkAnalyzerDashboard() {
       {/* Contenuto principale */}
       <div className="flex flex-1 overflow-hidden">
         {/* Barra laterale */}
-        <Sidebar 
+        <Sidebar
           activeTab={activeTab}
           onTabChange={setActiveTab}
           isTabDisabled={isTabDisabled}
           isServerAvailable={isServerAvailable}
           isConnectedToCloud={isConnectedToCloud}
           // Aggiungi la nuova tab Terraform alla navigazione
-          additionalTabs={[{ id: "terraform", name: "Terraform", icon: "Server" }]}
+          additionalTabs={[
+            { id: "terraform", name: "Terraform", icon: "Server" },
+          ]}
         />
 
         {/* Area contenuto */}
@@ -327,7 +342,7 @@ export default function NetworkAnalyzerDashboard() {
       </div>
 
       {/* Sistema di notifiche */}
-      <NotificationSystem 
+      <NotificationSystem
         notifications={notifications}
         onRemove={removeNotification}
       />
