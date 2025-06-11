@@ -117,12 +117,10 @@ resource "google_cloud_run_service" "backend" {
           limits = {
             cpu    = var.cpu_limit
             memory = var.memory_limit
-            timeout = 900
           }
           requests = {
             cpu    = var.cpu_limit
             memory = var.memory_limit
-            timeout = 900
           }
         }
         
@@ -216,12 +214,10 @@ resource "google_cloud_run_service" "frontend" {
           limits = {
             cpu    = var.cpu_limit
             memory = var.memory_limit
-            timeout = 900
           }
           requests = {
             cpu    = var.cpu_limit
             memory = var.memory_limit
-            timeout = 900
           }
         }
       }
