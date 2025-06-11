@@ -83,7 +83,7 @@ resource "google_cloud_run_service" "backend" {
       
       # Configurazione economica
       container_concurrency = 10
-
+      timeout_seconds = 900
       containers {
         image = var.backend_image_url
         
@@ -195,6 +195,7 @@ resource "google_cloud_run_service" "frontend" {
   template {
     spec {
       service_account_name = google_service_account.frontend_sa.email
+      timeout_seconds = 900
       
       containers {
         image = var.frontend_image_url
