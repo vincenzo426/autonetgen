@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API Flask per il frontend del Network Analyzer
+API Flask per il frontend del Network Analyzer con Google Cloud Storage Signed URLs
 """
 
 from flask import Flask, request, jsonify, send_file
@@ -9,8 +9,13 @@ import os
 import tempfile
 import shutil
 import json
+import uuid
+from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 from collections import Counter
+from google.cloud import storage
+from google.oauth2 import service_account
+import io
 from analysis_orchestrator import AnalysisOrchestrator
 from config import logger, DEFAULT_OUTPUT_DIR
 from terraform_manager import TerraformManager
@@ -18,12 +23,22 @@ from terraform_manager import TerraformManager
 app = Flask(__name__)
 CORS(app, origins=["*"])  # Permette chiamate da frontend React
 
-# Imposta il limite massimo di dimensione del file (500 MB)
-app.config['MAX_CONTENT_LENGTH'] = 1000 * 1024 * 1024  # 1 GB
+# Configurazione Google Cloud Storage
+GCS_BUCKET_NAME = os.environ.get('GCS_BUCKET_NAME', 'gruppo-10-autonetgen-storage')
+GOOGLE_APPLICATION_CREDENTIALS = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
 
-# Configura una directory per i file temporanei
-UPLOAD_FOLDER = tempfile.mkdtemp()
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# Inizializza il client GCS
+if GOOGLE_APPLICATION_CREDENTIALS and os.path.exists(GOOGLE_APPLICATION_CREDENTIALS):
+    storage_client = storage.Client.from_service_account_json(GOOGLE_APPLICATION_CREDENTIALS)
+else:
+    # Usa le credenziali di default dell'ambiente (utile su Cloud Run)
+    storage_client = storage.Client()
+
+bucket = storage_client.bucket(GCS_BUCKET_NAME)
+
+# Configura una directory per i file temporanei (ora usata solo per risultati)
+TEMP_DIR = tempfile.mkdtemp()
+app.config['TEMP_DIR'] = TEMP_DIR
 
 @app.errorhandler(413)
 def request_entity_too_large(error):
@@ -32,34 +47,258 @@ def request_entity_too_large(error):
         'status': 'error', 
         'message': 'File troppo grande per essere processato'
     }), 413
+
+class GCSFileManager:
+    """Gestisce le operazioni con Google Cloud Storage"""
     
+    @staticmethod
+    def generate_signed_url(blob_name, method='PUT', expiration=3600):
+        """
+        Genera una signed URL per l'upload di un file
+        
+        Args:
+            blob_name (str): Nome del blob su GCS
+            method (str): Metodo HTTP (PUT per upload)
+            expiration (int): Secondi di validità della URL
+            
+        Returns:
+            str: Signed URL
+        """
+        try:
+            blob = bucket.blob(blob_name)
+            
+            # Genera la signed URL
+            signed_url = blob.generate_signed_url(
+                version="v4",
+                expiration=datetime.utcnow() + timedelta(seconds=expiration),
+                method=method,
+                content_type="application/octet-stream"
+            )
+            
+            logger.info(f"Generated signed URL for {blob_name}")
+            return signed_url
+            
+        except Exception as e:
+            logger.error(f"Failed to generate signed URL for {blob_name}: {e}")
+            raise
+
+    @staticmethod
+    def download_file_to_memory(blob_name):
+        """
+        Scarica un file da GCS in memoria
+        
+        Args:
+            blob_name (str): Nome del blob su GCS
+            
+        Returns:
+            bytes: Contenuto del file
+        """
+        try:
+            blob = bucket.blob(blob_name)
+            
+            if not blob.exists():
+                raise FileNotFoundError(f"File {blob_name} not found in GCS")
+            
+            # Scarica il file in memoria
+            file_content = blob.download_as_bytes()
+            logger.info(f"Downloaded {blob_name} from GCS ({len(file_content)} bytes)")
+            
+            return file_content
+            
+        except Exception as e:
+            logger.error(f"Failed to download {blob_name} from GCS: {e}")
+            raise
+
+    @staticmethod
+    def move_file_to_processed(blob_name):
+        """
+        Sposta un file dalla cartella uploads a processed
+        
+        Args:
+            blob_name (str): Nome del blob da spostare
+            
+        Returns:
+            str: Nuovo nome del blob nella cartella processed
+        """
+        try:
+            source_blob = bucket.blob(blob_name)
+            
+            if not source_blob.exists():
+                raise FileNotFoundError(f"File {blob_name} not found in GCS")
+            
+            # Crea il nuovo nome nella cartella processed
+            processed_blob_name = blob_name.replace('uploads/', 'processed/', 1)
+            
+            # Copia il file
+            bucket.copy_blob(source_blob, bucket, processed_blob_name)
+            
+            # Elimina il file originale
+            source_blob.delete()
+            
+            logger.info(f"Moved {blob_name} to {processed_blob_name}")
+            return processed_blob_name
+            
+        except Exception as e:
+            logger.error(f"Failed to move {blob_name} to processed: {e}")
+            raise
+
+    @staticmethod
+    def cleanup_session_files(session_id):
+        """
+        Pulisce tutti i file di una sessione
+        
+        Args:
+            session_id (str): ID della sessione
+        """
+        try:
+            prefix = f"uploads/{session_id}/"
+            blobs = bucket.list_blobs(prefix=prefix)
+            
+            for blob in blobs:
+                try:
+                    blob.delete()
+                    logger.info(f"Deleted {blob.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete {blob.name}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Failed to cleanup session {session_id}: {e}")
+
+@app.route('/api/upload/signed-url', methods=['POST'])
+def generate_signed_url():
+    """
+    Endpoint per generare signed URLs per l'upload di file su GCS
+    """
+    try:
+        data = request.json
+        
+        if not data:
+            return jsonify({'status': 'error', 'message': 'No data provided'}), 400
+        
+        files_info = data.get('files', [])
+        session_id = data.get('session_id')
+        
+        if not files_info:
+            return jsonify({'status': 'error', 'message': 'No files specified'}), 400
+        
+        if not session_id:
+            # Genera un session_id se non fornito
+            session_id = str(uuid.uuid4())
+        
+        # Genera signed URLs per ogni file
+        signed_urls = []
+        for file_info in files_info:
+            filename = secure_filename(file_info.get('name', ''))
+            file_size = file_info.get('size', 0)
+            
+            if not filename:
+                continue
+            
+            # Crea il path del blob
+            blob_name = f"uploads/{session_id}/{filename}"
+            
+            # Genera la signed URL (valida per 1 ora)
+            try:
+                signed_url = GCSFileManager.generate_signed_url(
+                    blob_name=blob_name,
+                    method='PUT',
+                    expiration=3600
+                )
+                
+                signed_urls.append({
+                    'filename': filename,
+                    'blob_name': blob_name,
+                    'signed_url': signed_url,
+                    'size': file_size
+                })
+                
+            except Exception as e:
+                logger.error(f"Failed to generate signed URL for {filename}: {e}")
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Failed to generate signed URL for {filename}'
+                }), 500
+        
+        if not signed_urls:
+            return jsonify({'status': 'error', 'message': 'No valid files to upload'}), 400
+        
+        return jsonify({
+            'status': 'success',
+            'session_id': session_id,
+            'signed_urls': signed_urls,
+            'expires_in': 3600  # 1 ora
+        })
+        
+    except Exception as e:
+        logger.error(f"Error generating signed URLs: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/upload/verify', methods=['POST'])
+def verify_upload():
+    """
+    Endpoint per verificare che i file siano stati caricati correttamente su GCS
+    """
+    try:
+        data = request.json
+        blob_names = data.get('blob_names', [])
+        
+        if not blob_names:
+            return jsonify({'status': 'error', 'message': 'No blob names provided'}), 400
+        
+        verification_results = []
+        for blob_name in blob_names:
+            try:
+                blob = bucket.blob(blob_name)
+                exists = blob.exists()
+                size = blob.size if exists else 0
+                
+                verification_results.append({
+                    'blob_name': blob_name,
+                    'exists': exists,
+                    'size': size
+                })
+                
+            except Exception as e:
+                logger.error(f"Error verifying {blob_name}: {e}")
+                verification_results.append({
+                    'blob_name': blob_name,
+                    'exists': False,
+                    'error': str(e)
+                })
+        
+        return jsonify({
+            'status': 'success',
+            'verification_results': verification_results
+        })
+        
+    except Exception as e:
+        logger.error(f"Error verifying uploads: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
  
 @app.route('/api/analyze', methods=['POST'])
 def analyze():
     """
-    Endpoint per avviare l'analisi dei file di rete
-    Accetta file caricati e parametri di configurazione
+    Endpoint per avviare l'analisi dei file di rete da GCS
+    Ora accetta blob_names invece di file caricati direttamente
     """
     try:
-        # Estrai i file caricati
-        uploaded_files = []
-        for key in request.files:
-            file = request.files[key]
-            if file.filename:
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                uploaded_files.append(filepath)
+        data = request.json
         
-        if not uploaded_files:
-            return jsonify({'status': 'error', 'message': 'Nessun file caricato'}), 400
+        if not data:
+            return jsonify({'status': 'error', 'message': 'No data provided'}), 400
         
-        # Estrai i parametri
-        file_type = request.form.get('type', 'auto')
-        output_dir = request.form.get('output_dir', DEFAULT_OUTPUT_DIR)
-        output_graph = request.form.get('output_graph')
-        output_analysis = request.form.get('output_analysis')
-        output_terraform = request.form.get('output_terraform')
+        blob_names = data.get('blob_names', [])
+        session_id = data.get('session_id')
+        
+        if not blob_names:
+            return jsonify({'status': 'error', 'message': 'No files specified for analysis'}), 400
+        
+        # Estrai i parametri di configurazione
+        file_type = data.get('type', 'auto')
+        output_dir = data.get('output_dir', DEFAULT_OUTPUT_DIR)
+        output_graph = data.get('output_graph')
+        output_analysis = data.get('output_analysis')
+        output_terraform = data.get('output_terraform')
         
         # Crea la directory di output se non esiste
         os.makedirs(output_dir, exist_ok=True)
@@ -67,7 +306,7 @@ def analyze():
         # Inizializza l'orchestratore
         orchestrator = AnalysisOrchestrator()
         
-        # Esegui l'analisi per ogni file
+        # Prepara i risultati aggregati
         result_data = {
             'hosts': set(),
             'connections': {},
@@ -76,67 +315,102 @@ def analyze():
             'roles': {}
         }
         
-        for file_path in uploaded_files:
-            logger.info(f"Analisi del file: {file_path}")
+        processed_files = []
+        
+        # Analizza ogni file da GCS
+        for blob_name in blob_names:
+            logger.info(f"Analyzing file from GCS: {blob_name}")
             
-            success = orchestrator.run(
-                input_file=file_path,
-                file_type=file_type,
-                output_dir=output_dir,
-                output_graph=output_graph,
-                output_analysis=output_analysis,
-                output_terraform=output_terraform
-            )
-            
-            if not success:
-                return jsonify({
-                    'status': 'error', 
-                    'message': f'Analisi fallita per il file {os.path.basename(file_path)}'
-                }), 500
-            
-            # Aggrega i risultati dall'analizzatore interno all'orchestratore
-            analyzer_data = orchestrator.analyzer.get_data()
-            
-            # Aggiungi host
-            result_data['hosts'].update(analyzer_data['network_data'].hosts)
-            
-            # Aggiungi protocolli
-            for proto, count in analyzer_data['network_data'].protocols.items():
-                if proto in result_data['protocols']:
-                    result_data['protocols'][proto] += count
-                else:
-                    result_data['protocols'][proto] = count
-            
-            # Aggiungi subnet con conteggio host e ruolo
-            logger.info(f"items: {analyzer_data}")
-            subnet_roles_summary = {}
-
-            # Group roles by subnet
-            for ip, subnet in orchestrator.analyzer.subnets.items():
-                role = orchestrator.analyzer.host_roles.get(ip, "UNKNOWN")
-                subnet_roles_summary.setdefault(subnet, {'hosts': [], 'roles': set()})
-                subnet_roles_summary[subnet]['hosts'].append(ip)
-                subnet_roles_summary[subnet]['roles'].add(role)
-
-            # Build final subnet entries
-            for subnet, data in subnet_roles_summary.items():
-                host_count = len(data['hosts'])
-                roles_str = ", ".join(sorted(data['roles']))
-                result_data['subnets'][subnet] = f"{subnet} | Hosts in subnet: {host_count} | Roles: {roles_str}"
-
-
-            
-            # Aggiungi ruoli degli host
-            for host, role in orchestrator.analyzer.host_roles.items():
-                result_data['roles'][host] = role
-            
-            # Aggiungi connessioni
-            for (src, dst), count in analyzer_data['network_data'].connections.items():
-                conn_key = f"{src}->{dst}"
-                if conn_key in result_data['connections']:
-                    result_data['connections'][conn_key] += count
-                else:
-                    result_data['connections'][conn_key] = count
+            try:
+                # Scarica il file da GCS in memoria
+                file_content = GCSFileManager.download_file_to_memory(blob_name)
+                
+                # Crea un file temporaneo per l'analisi
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as temp_file:
+                    temp_file.write(file_content)
+                    temp_file_path = temp_file.name
+                
+                # Esegui l'analisi
+                success = orchestrator.run(
+                    input_file=temp_file_path,
+                    file_type=file_type,
+                    output_dir=output_dir,
+                    output_graph=output_graph,
+                    output_analysis=output_analysis,
+                    output_terraform=output_terraform
+                )
+                
+                # Pulisci il file temporaneo
+                try:
+                    os.unlink(temp_file_path)
+                except:
+                    pass
+                
+                if not success:
+                    logger.error(f"Analysis failed for {blob_name}")
+                    # In caso di errore, prova comunque a processare gli altri file
+                    continue
+                
+                # Sposta il file nella cartella processed
+                try:
+                    processed_blob_name = GCSFileManager.move_file_to_processed(blob_name)
+                    processed_files.append(processed_blob_name)
+                except Exception as e:
+                    logger.warning(f"Failed to move {blob_name} to processed: {e}")
+                    # Non bloccare l'analisi se il movimento fallisce
+                
+                # Aggrega i risultati dall'analizzatore
+                analyzer_data = orchestrator.analyzer.get_data()
+                
+                # Aggiungi host
+                result_data['hosts'].update(analyzer_data['network_data'].hosts)
+                
+                # Aggiungi protocolli
+                for proto, count in analyzer_data['network_data'].protocols.items():
+                    if proto in result_data['protocols']:
+                        result_data['protocols'][proto] += count
+                    else:
+                        result_data['protocols'][proto] = count
+                
+                # Aggiungi subnet con conteggio host e ruolo
+                subnet_roles_summary = {}
+                
+                # Raggruppa ruoli per subnet
+                for ip, subnet in orchestrator.analyzer.subnets.items():
+                    role = orchestrator.analyzer.host_roles.get(ip, "UNKNOWN")
+                    subnet_roles_summary.setdefault(subnet, {'hosts': [], 'roles': set()})
+                    subnet_roles_summary[subnet]['hosts'].append(ip)
+                    subnet_roles_summary[subnet]['roles'].add(role)
+                
+                # Costruisci le voci finali delle subnet
+                for subnet, data in subnet_roles_summary.items():
+                    host_count = len(data['hosts'])
+                    roles_str = ", ".join(sorted(data['roles']))
+                    result_data['subnets'][subnet] = f"{subnet} | Hosts in subnet: {host_count} | Roles: {roles_str}"
+                
+                # Aggiungi ruoli degli host
+                for host, role in orchestrator.analyzer.host_roles.items():
+                    result_data['roles'][host] = role
+                
+                # Aggiungi connessioni
+                for (src, dst), count in analyzer_data['network_data'].connections.items():
+                    conn_key = f"{src}->{dst}"
+                    if conn_key in result_data['connections']:
+                        result_data['connections'][conn_key] += count
+                    else:
+                        result_data['connections'][conn_key] = count
+                        
+            except Exception as e:
+                logger.error(f"Error processing {blob_name}: {e}")
+                # Continua con gli altri file anche se uno fallisce
+                continue
+        
+        # Verifica se almeno un file è stato processato con successo
+        if not result_data['hosts'] and not result_data['connections']:
+            return jsonify({
+                'status': 'error',
+                'message': 'No files were successfully analyzed'
+            }), 500
         
         # Prepara il risultato finale
         final_result = {
@@ -148,6 +422,8 @@ def analyze():
             'subnets': list(result_data['subnets'].values()),
             'roles': {},
             'anomalies': 0,  # Questo richiede un'implementazione per rilevare anomalie
+            'session_id': session_id,
+            'processed_files': processed_files,
             'output_paths': {
                 'graph': output_graph,
                 'analysis': output_analysis,
@@ -164,22 +440,38 @@ def analyze():
         
         return jsonify({
             'status': 'success',
-            'message': 'Analisi completata',
+            'message': 'Analysis completed',
             'results': final_result
         })
             
     except Exception as e:
-        logger.error(f"Errore durante l'analisi: {e}")
+        logger.error(f"Error during analysis: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    finally:
-        # Pulizia file temporanei
-        for file_path in uploaded_files:
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except:
-                    pass
 
+@app.route('/api/cleanup/session', methods=['POST'])
+def cleanup_session():
+    """
+    Endpoint per pulire i file di una sessione
+    """
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        
+        if not session_id:
+            return jsonify({'status': 'error', 'message': 'Session ID required'}), 400
+        
+        GCSFileManager.cleanup_session_files(session_id)
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Session {session_id} cleaned up successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up session: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# Mantieni tutti gli altri endpoint esistenti (download, terraform, etc.)
 @app.route('/api/download/<file_type>', methods=['GET'])
 def download_file(file_type):
     """
@@ -314,6 +606,7 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'service': 'network-analyzer-backend',
+        'gcs_bucket': GCS_BUCKET_NAME,
         'timestamp': str(os.environ.get('K_REVISION', 'unknown'))
     }), 200
 
@@ -361,7 +654,7 @@ def determine_terraform_file_type(file_name, file_path):
     # Tipo predefinito se non è possibile determinarlo
     return 'configuration'
 
-# Aggiungi questi endpoint nella classe Flask dell'API
+# Mantieni tutti gli endpoint Terraform esistenti
 @app.route('/api/terraform/init', methods=['POST'])
 def terraform_init():
     """

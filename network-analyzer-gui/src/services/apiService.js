@@ -5,6 +5,7 @@ const API_URL =
 
 /**
  * Servizio per comunicare con il backend API
+ * Aggiornato per supportare Google Cloud Storage con Signed URLs
  */
 const apiService = {
   /**
@@ -25,35 +26,45 @@ const apiService = {
   },
 
   /**
-   * Avvia l'analisi di file di rete
-   * @param {File[]} files - Array di oggetti File da analizzare
-   * @param {Object} options - Opzioni di configurazione dell'analisi
-   * @returns {Promise<Object>} Risultato dell'analisi
+   * Genera un session ID unico per l'upload
+   * @returns {string} Session ID unico
    */
-  analyzeFiles: async (files, options) => {
+  generateSessionId: () => {
+    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  },
+
+  /**
+   * Ottiene signed URLs per l'upload di file su GCS
+   * @param {File[]} files - Array di oggetti File da caricare
+   * @param {string} sessionId - ID della sessione (opzionale, verrà generato se non fornito)
+   * @returns {Promise<Object>} Signed URLs e informazioni della sessione
+   */
+  getSignedUrls: async (files, sessionId = null) => {
     try {
-      // Creazione del FormData per inviare i file
-      const formData = new FormData();
+      if (!files || files.length === 0) {
+        throw new Error("No files provided");
+      }
 
-      // Aggiungi i file
-      files.forEach((file, index) => {
-        formData.append(`file_${index}`, file);
-      });
+      // Prepara le informazioni dei file
+      const filesInfo = files.map((file) => ({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      }));
 
-      // Aggiungi le opzioni di configurazione
-      if (options.type) formData.append("type", options.type);
-      if (options.output_dir) formData.append("output_dir", options.output_dir);
-      if (options.output_graph)
-        formData.append("output_graph", options.output_graph);
-      if (options.output_analysis)
-        formData.append("output_analysis", options.output_analysis);
-      if (options.output_terraform)
-        formData.append("output_terraform", options.output_terraform);
+      const requestData = {
+        files: filesInfo,
+        session_id: sessionId || apiService.generateSessionId(),
+      };
 
-      // Invia la richiesta al server
-      const response = await fetch(`${API_URL}/analyze`, {
+      console.log("Requesting signed URLs for:", requestData);
+
+      const response = await fetch(`${API_URL}/upload/signed-url`, {
         method: "POST",
-        body: formData,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestData),
       });
 
       if (!response.ok) {
@@ -63,12 +74,447 @@ const apiService = {
         );
       }
 
-      return await response.json();
+      const result = await response.json();
+      console.log("Received signed URLs:", result);
+
+      return result;
+    } catch (error) {
+      console.error("Failed to get signed URLs:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Carica un file direttamente su GCS usando la signed URL
+   * @param {File} file - File da caricare
+   * @param {string} signedUrl - Signed URL per l'upload
+   * @param {Function} onProgress - Callback per il progresso dell'upload (opzionale)
+   * @returns {Promise<Object>} Risultato dell'upload
+   */
+  uploadFileToGCS: async (file, signedUrl, onProgress = null) => {
+    try {
+      console.log(`Uploading ${file.name} to GCS...`);
+
+      // Crea la richiesta di upload
+      const uploadPromise = new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+
+        // Gestione del progresso
+        if (onProgress) {
+          xhr.upload.addEventListener("progress", (event) => {
+            if (event.lengthComputable) {
+              const percentComplete = (event.loaded / event.total) * 100;
+              onProgress(percentComplete);
+            }
+          });
+        }
+
+        // Gestione della risposta
+        xhr.onload = () => {
+          if (xhr.status === 200 || xhr.status === 201) {
+            resolve({
+              success: true,
+              status: xhr.status,
+              message: `File ${file.name} uploaded successfully`,
+            });
+          } else {
+            reject(
+              new Error(
+                `Upload failed with status ${xhr.status}: ${xhr.statusText}`
+              )
+            );
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new Error(`Network error during upload of ${file.name}`));
+        };
+
+        xhr.ontimeout = () => {
+          reject(new Error(`Upload timeout for ${file.name}`));
+        };
+
+        // Configura la richiesta
+        xhr.open("PUT", signedUrl);
+        xhr.setRequestHeader("Content-Type", "application/octet-stream");
+
+        // Timeout di 30 minuti per file grandi
+        xhr.timeout = 30 * 60 * 1000;
+
+        // Invia il file
+        xhr.send(file);
+      });
+
+      const result = await uploadPromise;
+      console.log(`Successfully uploaded ${file.name}`);
+      return result;
+    } catch (error) {
+      console.error(`Failed to upload ${file.name}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Carica múltipli file su GCS
+   * @param {File[]} files - Array di file da caricare
+   * @param {Array} signedUrlsData - Array di oggetti con signed URLs
+   * @param {Function} onProgress - Callback per il progresso totale (opzionale)
+   * @param {Function} onFileProgress - Callback per il progresso di ogni file (opzionale)
+   * @returns {Promise<Object>} Risultato dell'upload di tutti i file
+   */
+  uploadFilesToGCS: async (
+    files,
+    signedUrlsData,
+    onProgress = null,
+    onFileProgress = null
+  ) => {
+    try {
+      const uploadResults = [];
+      const totalFiles = files.length;
+      let completedFiles = 0;
+
+      console.log(`Starting upload of ${totalFiles} files...`);
+
+      // Carica ogni file
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const urlData = signedUrlsData.find(
+          (data) => data.filename === file.name
+        );
+
+        if (!urlData) {
+          throw new Error(`No signed URL found for file: ${file.name}`);
+        }
+
+        try {
+          // Callback per il progresso del singolo file
+          const fileProgressCallback = onFileProgress
+            ? (progress) => onFileProgress(file.name, progress)
+            : null;
+
+          const result = await apiService.uploadFileToGCS(
+            file,
+            urlData.signed_url,
+            fileProgressCallback
+          );
+
+          uploadResults.push({
+            filename: file.name,
+            blob_name: urlData.blob_name,
+            success: true,
+            ...result,
+          });
+
+          completedFiles++;
+
+          // Aggiorna il progresso totale
+          if (onProgress) {
+            onProgress((completedFiles / totalFiles) * 100);
+          }
+        } catch (error) {
+          console.error(`Failed to upload ${file.name}:`, error);
+          uploadResults.push({
+            filename: file.name,
+            blob_name: urlData.blob_name,
+            success: false,
+            error: error.message,
+          });
+
+          completedFiles++;
+
+          // Aggiorna il progresso anche per i fallimenti
+          if (onProgress) {
+            onProgress((completedFiles / totalFiles) * 100);
+          }
+        }
+      }
+
+      // Verifica se almeno un file è stato caricato con successo
+      const successfulUploads = uploadResults.filter(
+        (result) => result.success
+      );
+      const failedUploads = uploadResults.filter((result) => !result.success);
+
+      if (successfulUploads.length === 0) {
+        throw new Error("All file uploads failed");
+      }
+
+      console.log(
+        `Upload completed: ${successfulUploads.length} successful, ${failedUploads.length} failed`
+      );
+
+      return {
+        success: true,
+        results: uploadResults,
+        successful_uploads: successfulUploads,
+        failed_uploads: failedUploads,
+        blob_names: successfulUploads.map((result) => result.blob_name),
+      };
+    } catch (error) {
+      console.error("Bulk upload failed:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Verifica che i file siano stati caricati correttamente su GCS
+   * @param {string[]} blobNames - Array di nomi blob da verificare
+   * @returns {Promise<Object>} Risultato della verifica
+   */
+  verifyUploads: async (blobNames) => {
+    try {
+      console.log("Verifying uploads:", blobNames);
+
+      const response = await fetch(`${API_URL}/upload/verify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          blob_names: blobNames,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || `HTTP error! Status: ${response.status}`
+        );
+      }
+
+      const result = await response.json();
+      console.log("Verification results:", result);
+
+      return result;
+    } catch (error) {
+      console.error("Upload verification failed:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Processo completo di upload di file con gestione errori
+   * @param {File[]} files - Array di file da caricare
+   * @param {Function} onProgress - Callback per il progresso totale
+   * @param {Function} onFileProgress - Callback per il progresso di ogni file
+   * @returns {Promise<Object>} Risultato completo dell'upload
+   */
+  uploadFiles: async (files, onProgress = null, onFileProgress = null) => {
+    try {
+      console.log("Starting complete upload process...");
+
+      // Step 1: Ottieni signed URLs
+      const signedUrlsResponse = await apiService.getSignedUrls(files);
+
+      if (signedUrlsResponse.status !== "success") {
+        throw new Error("Failed to get signed URLs");
+      }
+
+      const { session_id, signed_urls, expires_in } = signedUrlsResponse;
+
+      // Step 2: Carica i file su GCS
+      const uploadResponse = await apiService.uploadFilesToGCS(
+        files,
+        signed_urls,
+        onProgress,
+        onFileProgress
+      );
+
+      if (!uploadResponse.success) {
+        throw new Error("File upload failed");
+      }
+
+      // Step 3: Verifica che i file siano stati caricati
+      const verificationResponse = await apiService.verifyUploads(
+        uploadResponse.blob_names
+      );
+
+      if (verificationResponse.status !== "success") {
+        throw new Error("Upload verification failed");
+      }
+
+      // Controlla che tutti i file siano presenti
+      const verificationResults = verificationResponse.verification_results;
+      const missingFiles = verificationResults.filter(
+        (result) => !result.exists
+      );
+
+      if (missingFiles.length > 0) {
+        console.warn("Some files are missing after upload:", missingFiles);
+
+        // Se alcuni file mancano, prova a ripulire la sessione
+        try {
+          await apiService.cleanupSession(session_id);
+        } catch (cleanupError) {
+          console.warn(
+            "Failed to cleanup session after missing files:",
+            cleanupError
+          );
+        }
+
+        throw new Error(
+          `Upload verification failed: ${missingFiles.length} files not found on server`
+        );
+      }
+
+      console.log("Complete upload process successful");
+
+      return {
+        success: true,
+        session_id,
+        blob_names: uploadResponse.blob_names,
+        upload_results: uploadResponse.results,
+        verification_results: verificationResults,
+      };
+    } catch (error) {
+      console.error("Complete upload process failed:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Avvia l'analisi di file di rete da GCS
+   * @param {string[]} blobNames - Array di nomi blob su GCS da analizzare
+   * @param {Object} options - Opzioni di configurazione dell'analisi
+   * @param {string} sessionId - ID della sessione
+   * @returns {Promise<Object>} Risultato dell'analisi
+   */
+  analyzeFiles: async (blobNames, options, sessionId) => {
+    try {
+      console.log("Starting analysis of files:", blobNames);
+
+      const requestData = {
+        blob_names: blobNames,
+        session_id: sessionId,
+        type: options.type || "auto",
+        output_dir: options.output_dir || "output",
+        output_graph: options.output_graph,
+        output_analysis: options.output_analysis,
+        output_terraform: options.output_terraform,
+      };
+
+      const response = await fetch(`${API_URL}/analyze`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || `HTTP error! Status: ${response.status}`
+        );
+      }
+
+      const result = await response.json();
+      console.log("Analysis completed:", result);
+
+      return result;
     } catch (error) {
       console.error("Analysis failed:", error);
       throw error;
     }
   },
+
+  /**
+   * Pulisce i file di una sessione
+   * @param {string} sessionId - ID della sessione da pulire
+   * @returns {Promise<Object>} Risultato della pulizia
+   */
+  cleanupSession: async (sessionId) => {
+    try {
+      console.log("Cleaning up session:", sessionId);
+
+      const response = await fetch(`${API_URL}/cleanup/session`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || `HTTP error! Status: ${response.status}`
+        );
+      }
+
+      const result = await response.json();
+      console.log("Session cleanup completed:", result);
+
+      return result;
+    } catch (error) {
+      console.error("Session cleanup failed:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Processo completo: upload e analisi di file
+   * @param {File[]} files - Array di file da processare
+   * @param {Object} analysisOptions - Opzioni per l'analisi
+   * @param {Function} onUploadProgress - Callback per il progresso dell'upload
+   * @param {Function} onFileProgress - Callback per il progresso di ogni file
+   * @returns {Promise<Object>} Risultato completo del processo
+   */
+  uploadAndAnalyzeFiles: async (
+    files,
+    analysisOptions,
+    onUploadProgress = null,
+    onFileProgress = null
+  ) => {
+    let sessionId = null;
+
+    try {
+      console.log("Starting complete upload and analysis process...");
+
+      // Step 1: Upload dei file
+      const uploadResult = await apiService.uploadFiles(
+        files,
+        onUploadProgress,
+        onFileProgress
+      );
+      sessionId = uploadResult.session_id;
+
+      console.log("Upload completed, starting analysis...");
+
+      // Step 2: Analisi dei file
+      const analysisResult = await apiService.analyzeFiles(
+        uploadResult.blob_names,
+        analysisOptions,
+        sessionId
+      );
+
+      console.log("Complete process successful");
+
+      return {
+        success: true,
+        upload_result: uploadResult,
+        analysis_result: analysisResult,
+        session_id: sessionId,
+      };
+    } catch (error) {
+      console.error("Complete process failed:", error);
+
+      // In caso di errore, prova a pulire la sessione
+      if (sessionId) {
+        try {
+          await apiService.cleanupSession(sessionId);
+          console.log("Session cleaned up after error");
+        } catch (cleanupError) {
+          console.warn("Failed to cleanup session after error:", cleanupError);
+        }
+      }
+
+      throw error;
+    }
+  },
+
   /**
    * Scarica un file dal server
    * @param {string} fileType - Tipo di file da scaricare (graph, analysis, terraform)

@@ -12,6 +12,7 @@ import apiService from "../services/apiService";
 
 /**
  * Componente principale che organizza il dashboard dell'applicazione
+ * Aggiornato per supportare Google Cloud Storage con Signed URLs
  */
 export default function NetworkAnalyzerDashboard() {
   // Stati per la gestione delle schede e dei file
@@ -37,6 +38,12 @@ export default function NetworkAnalyzerDashboard() {
     },
   });
 
+  // Stati per l'upload su GCS
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadingFiles, setUploadingFiles] = useState({});
+  const [sessionId, setSessionId] = useState(null);
+
   // Stati per le connessioni e le notifiche
   const [isConnectedToCloud, setIsConnectedToCloud] = useState(false);
   const [isServerAvailable, setIsServerAvailable] = useState(false);
@@ -47,6 +54,28 @@ export default function NetworkAnalyzerDashboard() {
   useEffect(() => {
     checkServerStatus();
   }, []);
+
+  // Cleanup della sessione quando l'utente lascia la pagina
+  useEffect(() => {
+    const handleBeforeUnload = async () => {
+      if (sessionId && isServerAvailable) {
+        try {
+          // Prova a pulire la sessione, ma non bloccare la chiusura della pagina
+          navigator.sendBeacon(
+            `${apiService.API_URL}/cleanup/session`,
+            JSON.stringify({ session_id: sessionId })
+          );
+        } catch (error) {
+          console.warn("Failed to cleanup session on page unload:", error);
+        }
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [sessionId, isServerAvailable]);
 
   /**
    * Verifica lo stato di connessione con il server backend
@@ -60,7 +89,7 @@ export default function NetworkAnalyzerDashboard() {
     } catch (error) {
       setIsServerAvailable(false);
       addNotification(
-        "Backend server is not available. Some features will be simulated.",
+        "Backend server is not available. Some features will be limited.",
         "error"
       );
       console.error("Server connection error:", error);
@@ -81,11 +110,8 @@ export default function NetworkAnalyzerDashboard() {
       // Convert to MB
       const sizeInMB = sizeInBytes / (1024 * 1024);
       setFileSize(sizeInMB);
-      console.log(`File size: ${sizeInMB.toFixed(2)} MB `);
-      addNotification(
-        `${files.length} file(s) uploaded successfully`,
-        "success"
-      );
+      console.log(`File size: ${sizeInMB.toFixed(2)} MB `);
+      addNotification(`${files.length} file(s) selected for upload`, "success");
     }
   };
 
@@ -101,7 +127,50 @@ export default function NetworkAnalyzerDashboard() {
   };
 
   /**
-   * Avvia l'analisi dei file caricati
+   * Callback per il progresso dell'upload totale
+   * @param {number} progress - Progresso in percentuale (0-100)
+   */
+  const handleUploadProgress = (progress) => {
+    setUploadProgress(Math.round(progress));
+  };
+
+  /**
+   * Callback per il progresso dell'upload di singoli file
+   * @param {string} filename - Nome del file
+   * @param {number} progress - Progresso in percentuale (0-100)
+   */
+  const handleFileProgress = (filename, progress) => {
+    setUploadingFiles((prev) => ({
+      ...prev,
+      [filename]: Math.round(progress),
+    }));
+  };
+
+  /**
+   * Resetta gli stati dell'upload
+   */
+  const resetUploadStates = () => {
+    setIsUploading(false);
+    setUploadProgress(0);
+    setUploadingFiles({});
+  };
+
+  /**
+   * Pulisce la sessione corrente
+   */
+  const cleanupCurrentSession = async () => {
+    if (sessionId && isServerAvailable) {
+      try {
+        await apiService.cleanupSession(sessionId);
+        console.log("Session cleaned up successfully");
+      } catch (error) {
+        console.warn("Failed to cleanup session:", error);
+      }
+    }
+  };
+
+  /**
+   * Avvia l'analisi dei file caricati usando il nuovo flusso GCS
    */
   const startAnalysis = async () => {
     if (uploadedFiles.length === 0) {
@@ -109,78 +178,104 @@ export default function NetworkAnalyzerDashboard() {
       return;
     }
 
+    if (!isServerAvailable) {
+      addNotification("Backend server is not available", "error");
+      return;
+    }
+
+    // Reset degli stati
     setIsAnalyzing(true);
+    setIsUploading(true);
+    resetUploadStates();
+
+    let currentSessionId = null;
 
     try {
-      if (isServerAvailable) {
-        // Se il server è disponibile, invia i file all'API
-        const response = await apiService.analyzeFiles(uploadedFiles, {
-          type: analysisConfig.parserType,
-          output_dir: analysisConfig.outputPaths.output_dir,
-          output_graph: analysisConfig.outputPaths.output_graph,
-          output_analysis: analysisConfig.outputPaths.output_analysis,
-          output_terraform: analysisConfig.outputPaths.output_terraform,
-        });
+      addNotification("Starting file upload to cloud storage...", "info");
 
-        if (response.status === "success") {
-          setAnalysisResults(response.results);
-          console.log("Analysis results:", response.results);
-          addNotification("Analysis completed successfully", "success");
-          setActiveTab("results");
-        } else {
-          throw new Error(response.message || "Analysis failed");
-        }
+      // Prepara le opzioni per l'analisi
+      const analysisOptions = {
+        type: analysisConfig.parserType,
+        output_dir: analysisConfig.outputPaths.output_dir,
+        output_graph: analysisConfig.outputPaths.output_graph,
+        output_analysis: analysisConfig.outputPaths.output_analysis,
+        output_terraform: analysisConfig.outputPaths.output_terraform,
+      };
+
+      // Esegui il processo completo di upload e analisi
+      const result = await apiService.uploadAndAnalyzeFiles(
+        uploadedFiles,
+        analysisOptions,
+        handleUploadProgress,
+        handleFileProgress
+      );
+
+      currentSessionId = result.session_id;
+      setSessionId(currentSessionId);
+
+      // Upload completato, inizia l'analisi
+      setIsUploading(false);
+      addNotification(
+        "Files uploaded successfully, starting analysis...",
+        "success"
+      );
+
+      // Controlla se l'analisi è riuscita
+      if (
+        result.analysis_result &&
+        result.analysis_result.status === "success"
+      ) {
+        setAnalysisResults(result.analysis_result.results);
+        console.log("Analysis results:", result.analysis_result.results);
+        addNotification("Analysis completed successfully", "success");
+        setActiveTab("results");
       } else {
-        // Se il server non è disponibile, simula l'analisi
-        throw new Error("Simulated analysis due to server unavailability");
+        throw new Error(result.analysis_result?.message || "Analysis failed");
       }
     } catch (error) {
-      addNotification(`Analysis failed: ${error.message}`, "error");
-      console.error("Analysis error:", error);
+      console.error("Upload and analysis error:", error);
+
+      // Gestione specifica degli errori
+      if (error.message.includes("signed URL")) {
+        addNotification(
+          "Failed to get upload permission. Please try again.",
+          "error"
+        );
+      } else if (error.message.includes("Upload verification failed")) {
+        addNotification(
+          "File upload verification failed. Some files may not have been uploaded correctly.",
+          "error"
+        );
+      } else if (error.message.includes("All file uploads failed")) {
+        addNotification(
+          "All file uploads failed. Please check your internet connection and try again.",
+          "error"
+        );
+      } else if (error.message.includes("Analysis failed")) {
+        addNotification(
+          "File analysis failed. Please check if the files are in the correct format.",
+          "error"
+        );
+      } else {
+        addNotification(`Process failed: ${error.message}`, "error");
+      }
+
+      // In caso di errore, prova a pulire la sessione
+      if (currentSessionId) {
+        try {
+          await apiService.cleanupSession(currentSessionId);
+          console.log("Cleaned up session after error");
+        } catch (cleanupError) {
+          console.warn("Failed to cleanup session after error:", cleanupError);
+        }
+      }
     } finally {
       setIsAnalyzing(false);
+      setIsUploading(false);
+      resetUploadStates();
     }
   };
 
-  /**
-   * Simula un'analisi quando il server non è disponibile
-   *
-  const simulateAnalysis = async () => {
-    // Simula un ritardo per l'analisi
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    // Genera risultati simulati
-    const mockResults = {
-      hosts: uploadedFiles.length * 5 + Math.floor(Math.random() * 10),
-      hosts_list: Array.from({ length: uploadedFiles.length * 5 }, (_, i) => `192.168.1.${i + 1}`),
-      connections: uploadedFiles.length * 12 + Math.floor(Math.random() * 20),
-      protocols: [
-        { name: 'TCP', count: Math.floor(Math.random() * 100) + 50 },
-        { name: 'UDP', count: Math.floor(Math.random() * 50) + 10 },
-        { name: 'HTTP', count: Math.floor(Math.random() * 40) + 5 },
-        { name: 'MODBUS', count: Math.floor(Math.random() * 20) + 1 },
-        { name: 'S7COMM', count: Math.floor(Math.random() * 10) + 1 }
-      ],
-      anomalies: Math.floor(Math.random() * 5),
-      subnets: ['192.168.1.0/24', '10.0.0.0/24'],
-      roles: {
-        'CLIENT': Math.floor(Math.random() * 10) + 5,
-        'SERVER': Math.floor(Math.random() * 5) + 2,
-        'PLC_MODBUS': Math.floor(Math.random() * 3) + 1,
-        'GATEWAY': Math.floor(Math.random() * 2) + 1
-      },
-      output_paths: {
-        graph: analysisConfig.outputPaths.output_graph,
-        analysis: analysisConfig.outputPaths.output_analysis,
-        terraform: analysisConfig.outputPaths.output_terraform
-      }
-    };
-    
-    setAnalysisResults(mockResults);
-    addNotification("Analysis completed successfully (simulated)", "success");
-    setActiveTab("results");
-  };
-  */
   /**
    * Gestisce l'esportazione dei risultati
    * @param {string} type - Tipo di esportazione (graph, analysis, terraform)
@@ -198,9 +293,9 @@ export default function NetworkAnalyzerDashboard() {
         await apiService.downloadFile(type, analysisResults.output_paths[type]);
         addNotification(`${type} exported successfully`, "success");
       } else {
-        // Simula un'esportazione
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        addNotification(`${type} exported successfully (simulated)`, "success");
+        throw new Error(
+          "Export not available - server not connected or no analysis results"
+        );
       }
     } catch (error) {
       addNotification(`Export failed: ${error.message}`, "error");
@@ -258,6 +353,21 @@ export default function NetworkAnalyzerDashboard() {
   };
 
   /**
+   * Gestisce la pulizia manuale dei file
+   */
+  const handleCleanupFiles = async () => {
+    if (sessionId) {
+      try {
+        await cleanupCurrentSession();
+        addNotification("Files cleaned up successfully", "success");
+        setSessionId(null);
+      } catch (error) {
+        addNotification("Failed to cleanup files", "error");
+      }
+    }
+  };
+
+  /**
    * Renderizza il contenuto attivo
    */
   const renderActiveTabContent = () => {
@@ -268,6 +378,9 @@ export default function NetworkAnalyzerDashboard() {
             uploadedFiles={uploadedFiles}
             onFilesUploaded={handleFilesUploaded}
             onContinue={() => setActiveTab("analyze")}
+            isUploading={isUploading}
+            uploadProgress={uploadProgress}
+            uploadingFiles={uploadingFiles}
           />
         );
 
@@ -278,11 +391,23 @@ export default function NetworkAnalyzerDashboard() {
             onConfigChange={updateAnalysisConfig}
             onStartAnalysis={startAnalysis}
             isAnalyzing={isAnalyzing}
+            isUploading={isUploading}
+            uploadProgress={uploadProgress}
+            uploadingFiles={uploadingFiles}
+            sessionId={sessionId}
+            onCleanupFiles={handleCleanupFiles}
           />
         );
 
       case "results":
-        return <ResultsTab results={analysisResults} onExport={handleExport} />;
+        return (
+          <ResultsTab
+            results={analysisResults}
+            onExport={handleExport}
+            sessionId={sessionId}
+            onCleanupFiles={handleCleanupFiles}
+          />
+        );
 
       case "export":
         return (
@@ -292,6 +417,7 @@ export default function NetworkAnalyzerDashboard() {
             onToggleCloud={toggleCloudConnection}
             onExport={handleExport}
             onNotify={addNotification}
+            sessionId={sessionId}
           />
         );
 
@@ -302,6 +428,7 @@ export default function NetworkAnalyzerDashboard() {
             isCloudConnected={isConnectedToCloud}
             onToggleCloud={toggleCloudConnection}
             onNotify={addNotification}
+            sessionId={sessionId}
           />
         );
 
@@ -318,6 +445,8 @@ export default function NetworkAnalyzerDashboard() {
         isServerAvailable={isServerAvailable}
         isConnectedToCloud={isConnectedToCloud}
         onToggleCloud={toggleCloudConnection}
+        isUploading={isUploading}
+        uploadProgress={uploadProgress}
       />
 
       {/* Contenuto principale */}
@@ -329,6 +458,7 @@ export default function NetworkAnalyzerDashboard() {
           isTabDisabled={isTabDisabled}
           isServerAvailable={isServerAvailable}
           isConnectedToCloud={isConnectedToCloud}
+          isProcessing={isAnalyzing || isUploading}
           // Aggiungi la nuova tab Terraform alla navigazione
           additionalTabs={[
             { id: "terraform", name: "Terraform", icon: "Server" },
@@ -346,6 +476,61 @@ export default function NetworkAnalyzerDashboard() {
         notifications={notifications}
         onRemove={removeNotification}
       />
+
+      {/* Modal di progresso per upload di file grandi */}
+      {isUploading && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold mb-4">Uploading Files</h3>
+
+            {/* Progresso totale */}
+            <div className="mb-4">
+              <div className="flex justify-between text-sm text-gray-600 mb-1">
+                <span>Overall Progress</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                ></div>
+              </div>
+            </div>
+
+            {/* Progresso per singoli file */}
+            {Object.entries(uploadingFiles).length > 0 && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-gray-700">
+                  File Progress:
+                </h4>
+                {Object.entries(uploadingFiles).map(([filename, progress]) => (
+                  <div key={filename} className="text-xs">
+                    <div className="flex justify-between text-gray-600 mb-1">
+                      <span className="truncate" title={filename}>
+                        {filename.length > 30
+                          ? `${filename.substring(0, 27)}...`
+                          : filename}
+                      </span>
+                      <span>{progress}%</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-1">
+                      <div
+                        className="bg-green-600 h-1 rounded-full transition-all duration-300"
+                        style={{ width: `${progress}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="text-sm text-gray-600 mt-4">
+              Please don't close this window while files are being uploaded to
+              cloud storage.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
