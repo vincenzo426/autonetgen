@@ -8,8 +8,8 @@ resource "google_project_service" "required_apis" {
     "storage-api.googleapis.com",
     "storage-component.googleapis.com",
     "logging.googleapis.com",
-    "monitoring.googleapis.com",
-    "secretmanager.googleapis.com"  # Aggiunta per Secret Manager
+    "monitoring.googleapis.com"
+    # Rimossa secretmanager.googleapis.com perché non la usiamo più
   ])
   
   service = each.value
@@ -62,13 +62,6 @@ resource "google_storage_bucket_iam_member" "autonetgen_sa_storage" {
   member = "serviceAccount:${google_service_account.autonetgen_sa.email}"
 }
 
-# Permesso per accedere ai secrets
-resource "google_project_iam_member" "cloud_run_secret_access" {
-  project = var.project_id
-  role    = "roles/secretmanager.secretAccessor"
-  member  = "serviceAccount:${google_service_account.autonetgen_sa.email}"
-}
-
 # === GESTIONE SICURA DELLE CREDENZIALI ===
 
 # Genera una chiave per il service account
@@ -77,36 +70,6 @@ resource "google_service_account_key" "autonetgen_sa_key" {
   
   # La chiave viene generata in formato JSON
   public_key_type = "TYPE_X509_PEM_FILE"
-}
-
-# Crea un secret in Secret Manager per archiviare la chiave
-resource "google_secret_manager_secret" "gcp_credentials" {
-  secret_id = "autonetgen-gcp-credentials"
-  
-  replication {
-    user_managed {
-      replicas {
-        location = var.region
-      }
-    }
-  }
-  
-  depends_on = [google_project_service.required_apis]
-}
-
-# Archivia la chiave del service account nel secret
-resource "google_secret_manager_secret_version" "gcp_credentials_version" {
-  secret = google_secret_manager_secret.gcp_credentials.id
-  
-  # La chiave viene decodificata da base64 e archiviata come JSON
-  secret_data = base64decode(google_service_account_key.autonetgen_sa_key.private_key)
-}
-
-# Permette al service account di accedere al proprio secret
-resource "google_secret_manager_secret_iam_member" "secret_access" {
-  secret_id = google_secret_manager_secret.gcp_credentials.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.autonetgen_sa.email}"
 }
 
 # Cloud Run service per il backend (PRIVATO)
@@ -143,16 +106,10 @@ resource "google_cloud_run_service" "backend" {
           value = "1"
         }
 
-        # Nome del secret con le credenziali GCP
+        # Chiave del service account direttamente come variabile di ambiente
         env {
-          name  = "GCP_CREDENTIALS_SECRET_NAME"
-          value = google_secret_manager_secret.gcp_credentials.secret_id
-        }
-        
-        # Regione per il Secret Manager
-        env {
-          name  = "GCP_REGION"
-          value = var.region
+          name  = "GOOGLE_APPLICATION_CREDENTIALS_JSON"
+          value = base64decode(google_service_account_key.autonetgen_sa_key.private_key)
         }
         
         # Configurazione risorse economica
@@ -210,7 +167,7 @@ resource "google_cloud_run_service" "backend" {
   
   depends_on = [
     google_project_service.required_apis,
-    google_secret_manager_secret_version.gcp_credentials_version
+    google_service_account_key.autonetgen_sa_key
   ]
 }
 

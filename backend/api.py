@@ -25,15 +25,34 @@ CORS(app, origins=["*"])  # Permette chiamate da frontend React
 
 # Configurazione Google Cloud Storage
 GCS_BUCKET_NAME = os.environ.get('STORAGE_BUCKET', 'gruppo-10-autonetgen-storage')
-GOOGLE_APPLICATION_CREDENTIALS = os.environ.get('GCP_CREDENTIALS_SECRET_NAME')
 
-# Inizializza il client GCS
-if GOOGLE_APPLICATION_CREDENTIALS and os.path.exists(GOOGLE_APPLICATION_CREDENTIALS):
-    storage_client = storage.Client.from_service_account_json(GOOGLE_APPLICATION_CREDENTIALS)
-else:
-    # Usa le credenziali di default dell'ambiente (utile su Cloud Run)
-    storage_client = storage.Client()
+# Inizializza il client GCS usando le credenziali dalla variabile di ambiente
+def get_storage_client():
+    """Inizializza il client Google Cloud Storage"""
+    try:
+        # Prova a leggere le credenziali dalla variabile di ambiente
+        credentials_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+        
+        if credentials_json:
+            # Carica le credenziali dal JSON nella variabile di ambiente
+            credentials_info = json.loads(credentials_json)
+            credentials = service_account.Credentials.from_service_account_info(credentials_info)
+            storage_client = storage.Client(credentials=credentials)
+            logger.info("Client GCS inizializzato con credenziali dalla variabile di ambiente")
+        else:
+            # Usa le credenziali di default dell'ambiente (utile su Cloud Run)
+            storage_client = storage.Client()
+            logger.info("Client GCS inizializzato con credenziali di default")
+            
+        return storage_client
+        
+    except Exception as e:
+        logger.error(f"Errore nell'inizializzazione del client GCS: {e}")
+        # Fallback alle credenziali di default
+        return storage.Client()
 
+# Inizializza il client
+storage_client = get_storage_client()
 bucket = storage_client.bucket(GCS_BUCKET_NAME)
 
 # Configura una directory per i file temporanei (ora usata solo per risultati)
@@ -110,6 +129,30 @@ class GCSFileManager:
             raise
 
     @staticmethod
+    def upload_file_from_memory(file_content, blob_name, content_type='application/octet-stream'):
+        """
+        Carica un file su GCS dalla memoria
+        
+        Args:
+            file_content (bytes): Contenuto del file
+            blob_name (str): Nome del blob su GCS
+            content_type (str): Tipo di contenuto
+            
+        Returns:
+            str: URL pubblico del file
+        """
+        try:
+            blob = bucket.blob(blob_name)
+            blob.upload_from_string(file_content, content_type=content_type)
+            
+            logger.info(f"File caricato su GCS: {blob_name}")
+            return f"gs://{GCS_BUCKET_NAME}/{blob_name}"
+            
+        except Exception as e:
+            logger.error(f"Errore nel caricamento su GCS: {e}")
+            raise
+
+    @staticmethod
     def move_file_to_processed(blob_name):
         """
         Sposta un file dalla cartella uploads a processed
@@ -163,6 +206,45 @@ class GCSFileManager:
                     
         except Exception as e:
             logger.error(f"Failed to cleanup session {session_id}: {e}")
+
+    @staticmethod
+    def file_exists(blob_name):
+        """
+        Verifica se un file esiste su GCS
+        
+        Args:
+            blob_name (str): Nome del blob su GCS
+            
+        Returns:
+            bool: True se il file esiste
+        """
+        try:
+            blob = bucket.blob(blob_name)
+            return blob.exists()
+        except Exception as e:
+            logger.error(f"Errore nella verifica esistenza file: {e}")
+            return False
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint per Cloud Run"""
+    try:
+        # Testa la connessione a GCS
+        bucket.reload()
+        
+        return jsonify({
+            'status': 'healthy',
+            'service': 'autonetgen-backend',
+            'bucket': GCS_BUCKET_NAME,
+            'timestamp': datetime.utcnow().isoformat()
+        }), 200
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.utcnow().isoformat()
+        }), 503
 
 @app.route('/api/upload/signed-url', methods=['POST'])
 def generate_signed_url():
@@ -598,18 +680,6 @@ def save_terraform_file():
         logger.error(f"Errore durante il salvataggio del file: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """
-    Endpoint per verificare lo stato del servizio
-    """
-    return jsonify({
-        'status': 'healthy',
-        'service': 'network-analyzer-backend',
-        'gcs_bucket': GCS_BUCKET_NAME,
-        'timestamp': str(os.environ.get('K_REVISION', 'unknown'))
-    }), 200
-
 def determine_terraform_file_type(file_name, file_path):
     """
     Determina il tipo di file Terraform in base al nome e al contenuto
@@ -915,10 +985,21 @@ def terraform_status():
             'status': 'error',
             'message': str(e)
         }), 500
+
+@app.route('/api/status', methods=['GET'])
+def get_status():
+    """Endpoint per ottenere lo stato del servizio"""
+    return jsonify({
+        'status': 'running',
+        'service': 'autonetgen-backend',
+        'version': '1.0.0',
+        'bucket': GCS_BUCKET_NAME
+    })
         
 if __name__ == '__main__':
     # Assicurati che la directory di output esista
     os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
     
-    # In produzione, utilizzare un server WSGI come Gunicorn
-    app.run(debug=True, host='0.0.0.0', port=8080)
+    # Avvia il server Flask
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port, debug=False)
