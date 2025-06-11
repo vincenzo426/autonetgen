@@ -25,7 +25,7 @@ CORS(app, origins=["*"])  # Permette chiamate da frontend React
 
 # Configurazione Google Cloud Storage
 GCS_BUCKET_NAME = os.environ.get('STORAGE_BUCKET', 'gruppo-10-autonetgen-storage')
-GOOGLE_APPLICATION_CREDENTIALS = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+GOOGLE_APPLICATION_CREDENTIALS = os.environ.get('GCP_CREDENTIALS_SECRET_NAME')
 
 # Inizializza il client GCS
 if GOOGLE_APPLICATION_CREDENTIALS and os.path.exists(GOOGLE_APPLICATION_CREDENTIALS):
