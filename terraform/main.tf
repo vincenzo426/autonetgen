@@ -61,6 +61,12 @@ resource "google_storage_bucket_iam_member" "autonetgen_sa_storage" {
   member = "serviceAccount:${google_service_account.autonetgen_sa.email}"
 }
 
+resource "google_project_iam_member" "cloud_run_secret_access" {
+  project = var.project_id
+  role    = "roles/secretmanager.secretAccessor"
+  member  = "serviceAccount:${google_service_account.autonetgen_sa.email}"
+}
+
 # Cloud Run service per il backend (PRIVATO)
 resource "google_cloud_run_service" "backend" {
   name     = "autonetgen-backend"
@@ -94,6 +100,16 @@ resource "google_cloud_run_service" "backend" {
           name  = "PYTHONUNBUFFERED"
           value = "1"
         }
+
+        env {
+          name = "ENV_SECRET"
+          value_from {
+            secret_key_ref {
+              name = "GOOGLE_APPLICATION_CREDENTIALS"
+              key  = "latest"
+            }
+          }
+        }
         
         # Configurazione risorse economica
         resources {

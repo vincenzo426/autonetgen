@@ -24,7 +24,7 @@ app = Flask(__name__)
 CORS(app, origins=["*"])  # Permette chiamate da frontend React
 
 # Configurazione Google Cloud Storage
-GCS_BUCKET_NAME = os.environ.get('GCS_BUCKET_NAME', 'gruppo-10-autonetgen-storage')
+GCS_BUCKET_NAME = os.environ.get('STORAGE_BUCKET', 'gruppo-10-autonetgen-storage')
 GOOGLE_APPLICATION_CREDENTIALS = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
 
 # Inizializza il client GCS
