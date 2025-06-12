@@ -16,8 +16,8 @@ region = "europe-west1"  # Amsterdam (economica per Europa)
 environment = "dev"
 
 # === CONFIGURAZIONE RISORSE (ECONOMICA) ===
-cpu_limit     = "2"      # Era "1"
-memory_limit  = "4Gi"    # Era "1Gi"  
+cpu_limit     = "8"      # Era "1"
+memory_limit  = "16Gi"    # Era "1Gi"  
 max_instances = 5        # Era 2
 
 # === CONFIGURAZIONE STORAGE ===
