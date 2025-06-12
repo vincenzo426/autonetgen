@@ -81,7 +81,7 @@ variable "cpu_limit" {
   default     = "1"
   
   validation {
-    condition = contains(["0.25", "0.5", "1", "2"], var.cpu_limit)
+    condition = contains(["0.25", "0.5", "1", "2", "4", "8", "10"], var.cpu_limit)
     error_message = "I valori CPU supportati sono: 0.25, 0.5, 1, 2."
   }
 }
@@ -92,7 +92,7 @@ variable "memory_limit" {
   default     = "1Gi"
   
   validation {
-    condition = contains(["256Mi", "512Mi", "1Gi", "2Gi", "4Gi"], var.memory_limit)
+    condition = contains(["256Mi", "512Mi", "1Gi", "2Gi", "4Gi", "8Gi", "16Gi"], var.memory_limit)
     error_message = "I valori memoria supportati sono: 256Mi, 512Mi, 1Gi, 2Gi, 4Gi."
   }
 }
