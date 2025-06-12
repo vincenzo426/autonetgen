@@ -21,7 +21,11 @@ from config import logger, DEFAULT_OUTPUT_DIR
 from terraform_manager import TerraformManager
 
 app = Flask(__name__)
-CORS(app, origins=["*"])  # Permette chiamate da frontend React
+CORS(app, 
+     origins=["*"],  # ATTENZIONE: solo per test!
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization"],
+     max_age=86400)
 
 # Configurazione Google Cloud Storage
 GCS_BUCKET_NAME = os.environ.get('STORAGE_BUCKET', 'gruppo-10-autonetgen-storage')
