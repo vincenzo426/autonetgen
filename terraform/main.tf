@@ -21,6 +21,8 @@ resource "google_project_service" "required_apis" {
 resource "google_storage_bucket" "autonetgen_storage" {
   name     = "${var.project_id}-autonetgen-storage"
   location = var.region
+
+  force_destroy = true  # Elimina contenuto automaticamente
   
   # Configurazione economica
   storage_class = "STANDARD"
@@ -82,6 +84,9 @@ resource "google_cloud_run_service" "backend" {
       service_account_name = google_service_account.autonetgen_sa.email
       # Configurazione economica
       container_concurrency = 10
+
+      timeout_seconds = 900
+
       containers {
         image = var.backend_image_url
         
@@ -148,8 +153,6 @@ resource "google_cloud_run_service" "backend" {
       }
     }
 
-    timeout_seconds = 900
-    
     metadata {
       annotations = {
         "autoscaling.knative.dev/minScale"         = "0"
@@ -195,6 +198,7 @@ resource "google_cloud_run_service" "frontend" {
   template {
     spec {
       service_account_name = google_service_account.frontend_sa.email
+      timeout_seconds = 900   
       containers {
         image = var.frontend_image_url
         
@@ -221,8 +225,6 @@ resource "google_cloud_run_service" "frontend" {
         }
       }
     }
-
-    timeout_seconds = 900    
 
     metadata {
       annotations = {
