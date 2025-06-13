@@ -59,7 +59,7 @@ def get_storage_client():
 storage_client = get_storage_client()
 bucket = storage_client.bucket(GCS_BUCKET_NAME)
 
-# Configura una directory per i file temporanei (ora usata solo per risultati)
+# Configura una directory per i file temporanei (ora usata solo per elaborazione temporanea)
 TEMP_DIR = tempfile.mkdtemp()
 app.config['TEMP_DIR'] = TEMP_DIR
 
@@ -157,6 +157,87 @@ class GCSFileManager:
             raise
 
     @staticmethod
+    def upload_directory_to_gcs(local_dir, gcs_prefix):
+        """
+        Carica una directory locale su GCS
+        
+        Args:
+            local_dir (str): Percorso della directory locale
+            gcs_prefix (str): Prefisso per i file su GCS
+            
+        Returns:
+            list: Lista dei file caricati su GCS
+        """
+        uploaded_files = []
+        try:
+            for root, dirs, files in os.walk(local_dir):
+                for file in files:
+                    local_file_path = os.path.join(root, file)
+                    # Calcola il percorso relativo dal local_dir
+                    relative_path = os.path.relpath(local_file_path, local_dir)
+                    # Crea il nome del blob combinando il prefisso con il percorso relativo
+                    blob_name = f"{gcs_prefix}/{relative_path}".replace("\\", "/")
+                    
+                    # Leggi il file e caricalo su GCS
+                    with open(local_file_path, 'rb') as f:
+                        file_content = f.read()
+                    
+                    # Determina il content-type basato sull'estensione
+                    content_type = 'application/octet-stream'
+                    if file.endswith('.json'):
+                        content_type = 'application/json'
+                    elif file.endswith('.pdf'):
+                        content_type = 'application/pdf'
+                    elif file.endswith('.png'):
+                        content_type = 'image/png'
+                    elif file.endswith('.tf'):
+                        content_type = 'text/plain'
+                    elif file.endswith('.zip'):
+                        content_type = 'application/zip'
+                    
+                    GCSFileManager.upload_file_from_memory(file_content, blob_name, content_type)
+                    uploaded_files.append(blob_name)
+                    
+            logger.info(f"Caricati {len(uploaded_files)} file da {local_dir} a GCS con prefisso {gcs_prefix}")
+            return uploaded_files
+            
+        except Exception as e:
+            logger.error(f"Errore durante il caricamento della directory su GCS: {e}")
+            raise
+
+    @staticmethod
+    def create_download_url(blob_name, expiration=3600):
+        """
+        Crea una signed URL per il download di un file da GCS
+        
+        Args:
+            blob_name (str): Nome del blob su GCS
+            expiration (int): Secondi di validità della URL
+            
+        Returns:
+            str: Signed URL per il download
+        """
+        try:
+            blob = bucket.blob(blob_name)
+            
+            if not blob.exists():
+                raise FileNotFoundError(f"File {blob_name} not found in GCS")
+            
+            # Genera la signed URL per il download
+            signed_url = blob.generate_signed_url(
+                version="v4",
+                expiration=datetime.utcnow() + timedelta(seconds=expiration),
+                method="GET"
+            )
+            
+            logger.info(f"Generated download URL for {blob_name}")
+            return signed_url
+            
+        except Exception as e:
+            logger.error(f"Failed to generate download URL for {blob_name}: {e}")
+            raise
+
+    @staticmethod
     def move_file_to_processed(blob_name):
         """
         Sposta un file dalla cartella uploads a processed
@@ -198,6 +279,7 @@ class GCSFileManager:
             session_id (str): ID della sessione
         """
         try:
+            # Pulisci file uploads
             prefix = f"uploads/{session_id}/"
             blobs = bucket.list_blobs(prefix=prefix)
             
@@ -207,6 +289,17 @@ class GCSFileManager:
                     logger.info(f"Deleted {blob.name}")
                 except Exception as e:
                     logger.warning(f"Failed to delete {blob.name}: {e}")
+            
+            # Pulisci anche i file di risultati
+            results_prefix = f"results/{session_id}/"
+            results_blobs = bucket.list_blobs(prefix=results_prefix)
+            
+            for blob in results_blobs:
+                try:
+                    blob.delete()
+                    logger.info(f"Deleted result file {blob.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete result file {blob.name}: {e}")
                     
         except Exception as e:
             logger.error(f"Failed to cleanup session {session_id}: {e}")
@@ -365,7 +458,7 @@ def verify_upload():
 def analyze():
     """
     Endpoint per avviare l'analisi dei file di rete da GCS
-    Ora accetta blob_names invece di file caricati direttamente
+    I risultati vengono salvati direttamente su GCS invece che localmente
     """
     try:
         data = request.json
@@ -381,154 +474,194 @@ def analyze():
         
         # Estrai i parametri di configurazione
         file_type = data.get('type', 'auto')
-        output_dir = data.get('output_dir', DEFAULT_OUTPUT_DIR)
-        output_graph = data.get('output_graph')
-        output_analysis = data.get('output_analysis')
-        output_terraform = data.get('output_terraform')
         
-        # Crea la directory di output se non esiste
-        os.makedirs(output_dir, exist_ok=True)
+        # Crea una directory temporanea per l'elaborazione locale
+        temp_output_dir = tempfile.mkdtemp()
         
-        # Inizializza l'orchestratore
-        orchestrator = AnalysisOrchestrator()
+        # Definisci i percorsi per i risultati su GCS
+        results_prefix = f"results/{session_id}"
+        graph_blob_name = f"{results_prefix}/network_graph.pdf"
+        analysis_blob_name = f"{results_prefix}/network_analysis.json"
+        terraform_prefix = f"{results_prefix}/terraform"
         
-        # Prepara i risultati aggregati
-        result_data = {
-            'hosts': set(),
-            'connections': {},
-            'protocols': {},
-            'subnets': {},
-            'roles': {}
-        }
+        # Definisci i percorsi temporanei locali
+        temp_graph_path = os.path.join(temp_output_dir, 'network_graph.pdf')
+        temp_analysis_path = os.path.join(temp_output_dir, 'network_analysis.json')
+        temp_terraform_dir = os.path.join(temp_output_dir, 'terraform')
         
-        processed_files = []
-        
-        # Analizza ogni file da GCS
-        for blob_name in blob_names:
-            logger.info(f"Analyzing file from GCS: {blob_name}")
+        try:
+            # Inizializza l'orchestratore
+            orchestrator = AnalysisOrchestrator()
             
-            try:
-                # Scarica il file da GCS in memoria
-                file_content = GCSFileManager.download_file_to_memory(blob_name)
-                
-                # Crea un file temporaneo per l'analisi
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as temp_file:
-                    temp_file.write(file_content)
-                    temp_file_path = temp_file.name
-                
-                # Esegui l'analisi
-                success = orchestrator.run(
-                    input_file=temp_file_path,
-                    file_type=file_type,
-                    output_dir=output_dir,
-                    output_graph=output_graph,
-                    output_analysis=output_analysis,
-                    output_terraform=output_terraform
-                )
-                
-                # Pulisci il file temporaneo
-                try:
-                    os.unlink(temp_file_path)
-                except:
-                    pass
-                
-                if not success:
-                    logger.error(f"Analysis failed for {blob_name}")
-                    # In caso di errore, prova comunque a processare gli altri file
-                    continue
-                
-                # Sposta il file nella cartella processed
-                try:
-                    processed_blob_name = GCSFileManager.move_file_to_processed(blob_name)
-                    processed_files.append(processed_blob_name)
-                except Exception as e:
-                    logger.warning(f"Failed to move {blob_name} to processed: {e}")
-                    # Non bloccare l'analisi se il movimento fallisce
-                
-                # Aggrega i risultati dall'analizzatore
-                analyzer_data = orchestrator.analyzer.get_data()
-                
-                # Aggiungi host
-                result_data['hosts'].update(analyzer_data['network_data'].hosts)
-                
-                # Aggiungi protocolli
-                for proto, count in analyzer_data['network_data'].protocols.items():
-                    if proto in result_data['protocols']:
-                        result_data['protocols'][proto] += count
-                    else:
-                        result_data['protocols'][proto] = count
-                
-                # Aggiungi subnet con conteggio host e ruolo
-                subnet_roles_summary = {}
-                
-                # Raggruppa ruoli per subnet
-                for ip, subnet in orchestrator.analyzer.subnets.items():
-                    role = orchestrator.analyzer.host_roles.get(ip, "UNKNOWN")
-                    subnet_roles_summary.setdefault(subnet, {'hosts': [], 'roles': set()})
-                    subnet_roles_summary[subnet]['hosts'].append(ip)
-                    subnet_roles_summary[subnet]['roles'].add(role)
-                
-                # Costruisci le voci finali delle subnet
-                for subnet, data in subnet_roles_summary.items():
-                    host_count = len(data['hosts'])
-                    roles_str = ", ".join(sorted(data['roles']))
-                    result_data['subnets'][subnet] = f"{subnet} | Hosts in subnet: {host_count} | Roles: {roles_str}"
-                
-                # Aggiungi ruoli degli host
-                for host, role in orchestrator.analyzer.host_roles.items():
-                    result_data['roles'][host] = role
-                
-                # Aggiungi connessioni
-                for (src, dst), count in analyzer_data['network_data'].connections.items():
-                    conn_key = f"{src}->{dst}"
-                    if conn_key in result_data['connections']:
-                        result_data['connections'][conn_key] += count
-                    else:
-                        result_data['connections'][conn_key] = count
-                        
-            except Exception as e:
-                logger.error(f"Error processing {blob_name}: {e}")
-                # Continua con gli altri file anche se uno fallisce
-                continue
-        
-        # Verifica se almeno un file è stato processato con successo
-        if not result_data['hosts'] and not result_data['connections']:
-            return jsonify({
-                'status': 'error',
-                'message': 'No files were successfully analyzed'
-            }), 500
-        
-        # Prepara il risultato finale
-        final_result = {
-            'hosts': len(result_data['hosts']),
-            'hosts_list': list(result_data['hosts']),
-            'connections': sum(result_data['connections'].values()),
-            'connections_details': result_data['connections'],
-            'protocols': [{'name': proto, 'count': count} for proto, count in result_data['protocols'].items()],
-            'subnets': list(result_data['subnets'].values()),
-            'roles': {},
-            'anomalies': 0,  # Questo richiede un'implementazione per rilevare anomalie
-            'session_id': session_id,
-            'processed_files': processed_files,
-            'output_paths': {
-                'graph': output_graph,
-                'analysis': output_analysis,
-                'terraform': output_terraform
+            # Prepara i risultati aggregati
+            result_data = {
+                'hosts': set(),
+                'connections': {},
+                'protocols': {},
+                'subnets': {},
+                'roles': {}
             }
-        }
-        
-        # Conta i ruoli
-        for host, role in result_data['roles'].items():
-            if role in final_result['roles']:
-                final_result['roles'][role] += 1
-            else:
-                final_result['roles'][role] = 1
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'Analysis completed',
-            'results': final_result
-        })
+            
+            processed_files = []
+            
+            # Analizza ogni file da GCS
+            for blob_name in blob_names:
+                logger.info(f"Analyzing file from GCS: {blob_name}")
+                
+                try:
+                    # Scarica il file da GCS in memoria
+                    file_content = GCSFileManager.download_file_to_memory(blob_name)
+                    
+                    # Crea un file temporaneo per l'analisi
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as temp_file:
+                        temp_file.write(file_content)
+                        temp_file_path = temp_file.name
+                    
+                    # Esegui l'analisi con percorsi temporanei
+                    success = orchestrator.run(
+                        input_file=temp_file_path,
+                        file_type=file_type,
+                        output_dir=temp_output_dir,
+                        output_graph=temp_graph_path,
+                        output_analysis=temp_analysis_path,
+                        output_terraform=temp_terraform_dir
+                    )
+                    
+                    # Pulisci il file temporaneo
+                    try:
+                        os.unlink(temp_file_path)
+                    except:
+                        pass
+                    
+                    if not success:
+                        logger.error(f"Analysis failed for {blob_name}")
+                        continue
+                    
+                    # Sposta il file nella cartella processed
+                    try:
+                        processed_blob_name = GCSFileManager.move_file_to_processed(blob_name)
+                        processed_files.append(processed_blob_name)
+                    except Exception as e:
+                        logger.warning(f"Failed to move {blob_name} to processed: {e}")
+                    
+                    # Aggrega i risultati dall'analizzatore
+                    analyzer_data = orchestrator.analyzer.get_data()
+                    
+                    # Aggiungi host
+                    result_data['hosts'].update(analyzer_data['network_data'].hosts)
+                    
+                    # Aggiungi protocolli
+                    for proto, count in analyzer_data['network_data'].protocols.items():
+                        if proto in result_data['protocols']:
+                            result_data['protocols'][proto] += count
+                        else:
+                            result_data['protocols'][proto] = count
+                    
+                    # Aggiungi subnet con conteggio host e ruolo
+                    subnet_roles_summary = {}
+                    
+                    # Raggruppa ruoli per subnet
+                    for ip, subnet in orchestrator.analyzer.subnets.items():
+                        role = orchestrator.analyzer.host_roles.get(ip, "UNKNOWN")
+                        subnet_roles_summary.setdefault(subnet, {'hosts': [], 'roles': set()})
+                        subnet_roles_summary[subnet]['hosts'].append(ip)
+                        subnet_roles_summary[subnet]['roles'].add(role)
+                    
+                    # Costruisci le voci finali delle subnet
+                    for subnet, data in subnet_roles_summary.items():
+                        host_count = len(data['hosts'])
+                        roles_str = ", ".join(sorted(data['roles']))
+                        result_data['subnets'][subnet] = f"{subnet} | Hosts in subnet: {host_count} | Roles: {roles_str}"
+                    
+                    # Aggiungi ruoli degli host
+                    for host, role in orchestrator.analyzer.host_roles.items():
+                        result_data['roles'][host] = role
+                    
+                    # Aggiungi connessioni
+                    for (src, dst), count in analyzer_data['network_data'].connections.items():
+                        conn_key = f"{src}->{dst}"
+                        if conn_key in result_data['connections']:
+                            result_data['connections'][conn_key] += count
+                        else:
+                            result_data['connections'][conn_key] = count
+                            
+                except Exception as e:
+                    logger.error(f"Error processing {blob_name}: {e}")
+                    continue
+            
+            # Verifica se almeno un file è stato processato con successo
+            if not result_data['hosts'] and not result_data['connections']:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'No files were successfully analyzed'
+                }), 500
+            
+            # Carica i risultati su GCS
+            uploaded_results = []
+            
+            # Carica il grafo di rete se esiste
+            if os.path.exists(temp_graph_path):
+                with open(temp_graph_path, 'rb') as f:
+                    graph_content = f.read()
+                GCSFileManager.upload_file_from_memory(graph_content, graph_blob_name, 'application/pdf')
+                uploaded_results.append(graph_blob_name)
+                logger.info(f"Uploaded network graph to {graph_blob_name}")
+            
+            # Carica l'analisi JSON se esiste
+            if os.path.exists(temp_analysis_path):
+                with open(temp_analysis_path, 'rb') as f:
+                    analysis_content = f.read()
+                GCSFileManager.upload_file_from_memory(analysis_content, analysis_blob_name, 'application/json')
+                uploaded_results.append(analysis_blob_name)
+                logger.info(f"Uploaded network analysis to {analysis_blob_name}")
+            
+            # Carica la directory Terraform se esiste
+            terraform_files = []
+            if os.path.exists(temp_terraform_dir):
+                terraform_files = GCSFileManager.upload_directory_to_gcs(temp_terraform_dir, terraform_prefix)
+                uploaded_results.extend(terraform_files)
+                logger.info(f"Uploaded {len(terraform_files)} Terraform files to {terraform_prefix}")
+            
+            # Prepara il risultato finale
+            final_result = {
+                'hosts': len(result_data['hosts']),
+                'hosts_list': list(result_data['hosts']),
+                'connections': sum(result_data['connections'].values()),
+                'connections_details': result_data['connections'],
+                'protocols': [{'name': proto, 'count': count} for proto, count in result_data['protocols'].items()],
+                'subnets': list(result_data['subnets'].values()),
+                'roles': {},
+                'anomalies': 0,
+                'session_id': session_id,
+                'processed_files': processed_files,
+                'result_files': {
+                    'graph': graph_blob_name if graph_blob_name in uploaded_results else None,
+                    'analysis': analysis_blob_name if analysis_blob_name in uploaded_results else None,
+                    'terraform_files': terraform_files
+                },
+                'gcs_results_prefix': results_prefix
+            }
+            
+            # Conta i ruoli
+            for host, role in result_data['roles'].items():
+                if role in final_result['roles']:
+                    final_result['roles'][role] += 1
+                else:
+                    final_result['roles'][role] = 1
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Analysis completed and results uploaded to cloud storage',
+                'results': final_result
+            })
+            
+        finally:
+            # Pulisci sempre la directory temporanea
+            try:
+                shutil.rmtree(temp_output_dir)
+                logger.info(f"Cleaned up temporary directory: {temp_output_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temporary directory: {e}")
             
     except Exception as e:
         logger.error(f"Error during analysis: {e}")
@@ -537,7 +670,7 @@ def analyze():
 @app.route('/api/cleanup/session', methods=['POST'])
 def cleanup_session():
     """
-    Endpoint per pulire i file di una sessione
+    Endpoint per pulire i file di una sessione (sia uploads che risultati)
     """
     try:
         data = request.json
@@ -557,211 +690,320 @@ def cleanup_session():
         logger.error(f"Error cleaning up session: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-# Mantieni tutti gli altri endpoint esistenti (download, terraform, etc.)
 @app.route('/api/download/<file_type>', methods=['GET'])
 def download_file(file_type):
     """
-    Endpoint per scaricare i file generati dall'analisi
+    Endpoint per scaricare i file generati dall'analisi da GCS
     """
     try:
-        if file_type == 'graph':
-            file_path = request.args.get('path', os.path.join(DEFAULT_OUTPUT_DIR, 'network_graph.pdf'))
-            return send_file(file_path, as_attachment=True, download_name='network_graph.pdf')
+        blob_name = request.args.get('blob_name')
+        session_id = request.args.get('session_id')
         
-        elif file_type == 'analysis':
-            file_path = request.args.get('path', os.path.join(DEFAULT_OUTPUT_DIR, 'network_analysis.json'))
-            return send_file(file_path, as_attachment=True, download_name='network_analysis.json')
+        if not blob_name and not session_id:
+            return jsonify({'status': 'error', 'message': 'Blob name or session ID required'}), 400
         
-        elif file_type == 'terraform':
-            # Crea un archivio zip dei file Terraform
-            terraform_dir = request.args.get('path', os.path.join(DEFAULT_OUTPUT_DIR, 'terraform'))
-            if not os.path.exists(terraform_dir):
-                return jsonify({'status': 'error', 'message': 'Directory Terraform non trovata'}), 404
+        # Se non è fornito il blob_name, costruiscilo dal session_id e file_type
+        if not blob_name:
+            if file_type == 'graph':
+                blob_name = f"results/{session_id}/network_graph.pdf"
+            elif file_type == 'analysis':
+                blob_name = f"results/{session_id}/network_analysis.json"
+            elif file_type == 'terraform':
+                # Per Terraform, crea uno ZIP di tutti i file
+                return download_terraform_archive(session_id)
+            else:
+                return jsonify({'status': 'error', 'message': 'Invalid file type'}), 400
+        
+        # Verifica che il file esista
+        if not GCSFileManager.file_exists(blob_name):
+            return jsonify({'status': 'error', 'message': 'File not found'}), 404
+        
+        # Genera una signed URL per il download
+        try:
+            download_url = GCSFileManager.create_download_url(blob_name, expiration=300)  # 5 minuti
             
-            # Crea un file ZIP temporaneo
-            temp_zip = os.path.join(tempfile.gettempdir(), 'terraform_config.zip')
-            shutil.make_archive(os.path.splitext(temp_zip)[0], 'zip', terraform_dir)
+            # Determina il nome del file per il download
+            filename = os.path.basename(blob_name)
+            if file_type == 'graph':
+                filename = 'network_graph.pdf'
+            elif file_type == 'analysis':
+                filename = 'network_analysis.json'
             
-            return send_file(temp_zip, as_attachment=True, download_name='terraform_config.zip')
-        
-        else:
-            return jsonify({'status': 'error', 'message': 'Tipo di file non valido'}), 400
+            return jsonify({
+                'status': 'success',
+                'download_url': download_url,
+                'filename': filename,
+                'blob_name': blob_name
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to generate download URL for {blob_name}: {e}")
+            return jsonify({'status': 'error', 'message': 'Failed to generate download URL'}), 500
             
     except Exception as e:
-        logger.error(f"Errore durante il download del file: {e}")
+        logger.error(f"Error during file download preparation: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+def download_terraform_archive(session_id):
+    """
+    Crea e restituisce un archivio ZIP dei file Terraform da GCS
+    """
+    try:
+        # Lista tutti i file Terraform per la sessione
+        terraform_prefix = f"results/{session_id}/terraform/"
+        terraform_blobs = bucket.list_blobs(prefix=terraform_prefix)
+        
+        # Crea un archivio ZIP in memoria
+        from io import BytesIO
+        import zipfile
+        
+        zip_buffer = BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for blob in terraform_blobs:
+                if blob.name.endswith('/'):  # Skip directories
+                    continue
+                
+                # Scarica il contenuto del file
+                file_content = blob.download_as_bytes()
+                
+                # Ottieni il nome del file relativo
+                relative_name = blob.name.replace(terraform_prefix, '')
+                
+                # Aggiungi al ZIP
+                zip_file.writestr(relative_name, file_content)
+        
+        zip_buffer.seek(0)
+        
+        # Crea un file temporaneo per il download
+        temp_zip_path = os.path.join(tempfile.gettempdir(), f'terraform_config_{session_id}.zip')
+        
+        with open(temp_zip_path, 'wb') as f:
+            f.write(zip_buffer.getvalue())
+        
+        return send_file(temp_zip_path, as_attachment=True, download_name='terraform_config.zip')
+        
+    except Exception as e:
+        logger.error(f"Error creating Terraform archive for session {session_id}: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to create Terraform archive'}), 500
 
 @app.route('/api/terraform/files', methods=['GET'])
 def get_terraform_files():
     """
-    Endpoint per ottenere la lista dei file Terraform
+    Endpoint per ottenere la lista dei file Terraform da GCS
     """
     try:
-        # Ottieni il percorso della directory Terraform
-        terraform_dir = request.args.get('path', os.path.join(DEFAULT_OUTPUT_DIR, 'terraform'))
+        session_id = request.args.get('session_id')
         
-        if not os.path.exists(terraform_dir):
-            return jsonify({'status': 'error', 'message': 'Directory Terraform non trovata'}), 404
+        if not session_id:
+            return jsonify({'status': 'error', 'message': 'Session ID required'}), 400
         
-        # Ottieni la lista dei file nella directory
+        # Lista i file Terraform su GCS
+        terraform_prefix = f"results/{session_id}/terraform/"
+        terraform_blobs = bucket.list_blobs(prefix=terraform_prefix)
+        
         files = []
-        for file_name in os.listdir(terraform_dir):
-            file_path = os.path.join(terraform_dir, file_name)
-            if os.path.isfile(file_path) and file_name.endswith('.tf'):
-                # Determina il tipo di file in base al contenuto o al nome
-                file_type = determine_terraform_file_type(file_name, file_path)
+        for blob in terraform_blobs:
+            if blob.name.endswith('/'):  # Skip directories
+                continue
+                
+            file_name = os.path.basename(blob.name)
+            if file_name.endswith('.tf'):
+                # Determina il tipo di file in base al contenuto del nome
+                file_type = determine_terraform_file_type_from_name(file_name)
                 
                 files.append({
                     'id': len(files) + 1,
                     'name': file_name,
                     'type': file_type,
-                    'size': os.path.getsize(file_path)
+                    'size': blob.size,
+                    'blob_name': blob.name
                 })
         
         return jsonify({
             'status': 'success',
-            'path': terraform_dir,
+            'session_id': session_id,
             'files': files
         })
     
     except Exception as e:
-        logger.error(f"Errore durante il recupero dei file Terraform: {e}")
+        logger.error(f"Error getting Terraform files for session: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/terraform/content', methods=['GET'])
 def get_terraform_file_content():
     """
-    Endpoint per ottenere il contenuto di un file Terraform
+    Endpoint per ottenere il contenuto di un file Terraform da GCS
     """
     try:
-        # Ottieni il percorso del file
-        file_path = request.args.get('path')
+        blob_name = request.args.get('blob_name')
         
-        if not file_path or not os.path.exists(file_path):
-            return jsonify({'status': 'error', 'message': 'File non trovato'}), 404
+        if not blob_name:
+            return jsonify({'status': 'error', 'message': 'Blob name required'}), 400
         
-        # Leggi il contenuto del file
-        with open(file_path, 'r') as file:
-            content = file.read()
+        # Verifica che il file esista
+        if not GCSFileManager.file_exists(blob_name):
+            return jsonify({'status': 'error', 'message': 'File not found'}), 404
         
-        return jsonify({
-            'status': 'success',
-            'content': content
-        })
+        # Scarica il contenuto del file
+        try:
+            file_content = GCSFileManager.download_file_to_memory(blob_name)
+            content_str = file_content.decode('utf-8')
+            
+            return jsonify({
+                'status': 'success',
+                'content': content_str,
+                'blob_name': blob_name
+            })
+            
+        except UnicodeDecodeError:
+            return jsonify({'status': 'error', 'message': 'File is not a text file'}), 400
     
     except Exception as e:
-        logger.error(f"Errore durante il recupero del contenuto del file: {e}")
+        logger.error(f"Error getting file content: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/terraform/save', methods=['POST'])
 def save_terraform_file():
     """
-    Endpoint per salvare le modifiche a un file Terraform
+    Endpoint per salvare le modifiche a un file Terraform su GCS
     """
     try:
-        # Ottieni i dati dalla richiesta
         data = request.json
-        file_path = data.get('path')
+        blob_name = data.get('blob_name')
         content = data.get('content')
         
-        if not file_path or not content:
-            return jsonify({'status': 'error', 'message': 'Percorso del file o contenuto mancante'}), 400
+        if not blob_name or content is None:
+            return jsonify({'status': 'error', 'message': 'Blob name and content required'}), 400
         
         # Verifica che il file esista
-        if not os.path.exists(file_path):
-            return jsonify({'status': 'error', 'message': 'File non trovato'}), 404
+        if not GCSFileManager.file_exists(blob_name):
+            return jsonify({'status': 'error', 'message': 'File not found'}), 404
         
-        # Salva il contenuto nel file
-        with open(file_path, 'w') as file:
-            file.write(content)
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'File salvato con successo'
-        })
+        # Salva il contenuto su GCS
+        try:
+            content_bytes = content.encode('utf-8')
+            GCSFileManager.upload_file_from_memory(content_bytes, blob_name, 'text/plain')
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'File saved successfully',
+                'blob_name': blob_name
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to save file {blob_name}: {e}")
+            return jsonify({'status': 'error', 'message': 'Failed to save file'}), 500
     
     except Exception as e:
-        logger.error(f"Errore durante il salvataggio del file: {e}")
+        logger.error(f"Error saving Terraform file: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-def determine_terraform_file_type(file_name, file_path):
+def determine_terraform_file_type_from_name(file_name):
     """
-    Determina il tipo di file Terraform in base al nome e al contenuto
+    Determina il tipo di file Terraform in base al nome
     
     Args:
         file_name (str): Nome del file
-        file_path (str): Percorso completo del file
         
     Returns:
         str: Tipo di file (network, compute, variables, output, configuration)
     """
-    # Controlla prima il nome del file
-    if file_name.startswith('provider') or file_name == 'main.tf':
+    file_name_lower = file_name.lower()
+    
+    if file_name_lower.startswith('provider') or file_name_lower == 'main.tf':
         return 'configuration'
-    elif file_name.startswith('network') or 'network' in file_name:
+    elif 'network' in file_name_lower or file_name_lower.startswith('network'):
         return 'network'
-    elif file_name.startswith('instance') or 'compute' in file_name:
+    elif 'instance' in file_name_lower or 'compute' in file_name_lower:
         return 'compute'
-    elif file_name.startswith('output') or 'output' in file_name:
+    elif 'output' in file_name_lower or file_name_lower.startswith('output'):
         return 'output'
-    elif file_name.startswith('variable') or 'var' in file_name:
+    elif 'variable' in file_name_lower or 'var' in file_name_lower:
         return 'variables'
-    
-    # Se non è possibile determinare il tipo dal nome, verifica il contenuto
-    try:
-        with open(file_path, 'r') as file:
-            content = file.read().lower()
-            
-            if 'provider "google"' in content or 'terraform {' in content:
-                return 'configuration'
-            elif 'google_compute_network' in content or 'google_compute_subnetwork' in content:
-                return 'network'
-            elif 'google_compute_instance' in content:
-                return 'compute'
-            elif 'output ' in content:
-                return 'output'
-            elif 'variable ' in content:
-                return 'variables'
-    except:
-        pass
-    
-    # Tipo predefinito se non è possibile determinarlo
-    return 'configuration'
+    else:
+        return 'configuration'
 
-# Mantieni tutti gli endpoint Terraform esistenti
+# Mantieni tutti gli endpoint Terraform esistenti adattati per lavorare con GCS
 @app.route('/api/terraform/init', methods=['POST'])
 def terraform_init():
     """
-    Endpoint per inizializzare Terraform nella directory specificata
+    Endpoint per inizializzare Terraform scaricando i file da GCS
     """
     try:
-        terraform_dir = request.json.get('terraformPath')
+        data = request.json
+        session_id = data.get('session_id')
         
-        if not terraform_dir or not os.path.exists(terraform_dir):
+        if not session_id:
             return jsonify({
                 'status': 'error', 
-                'message': 'Directory Terraform non valida'
+                'message': 'Session ID required'
             }), 400
         
-        # Inizializza il manager Terraform
-        manager = TerraformManager(terraform_dir)
-        result = manager.init()
+        # Crea una directory temporanea per i file Terraform
+        temp_terraform_dir = tempfile.mkdtemp()
         
-        if result['success']:
-            return jsonify({
-                'status': 'success',
-                'message': 'Terraform inizializzato con successo',
-                'output': result['output']
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': 'Errore durante l\'inizializzazione di Terraform',
-                'error': result['error']
-            }), 500
+        try:
+            # Scarica tutti i file Terraform da GCS
+            terraform_prefix = f"results/{session_id}/terraform/"
+            terraform_blobs = bucket.list_blobs(prefix=terraform_prefix)
+            
+            downloaded_files = 0
+            for blob in terraform_blobs:
+                if blob.name.endswith('/'):  # Skip directories
+                    continue
+                
+                # Scarica il file
+                file_content = blob.download_as_bytes()
+                
+                # Calcola il percorso locale
+                relative_path = blob.name.replace(terraform_prefix, '')
+                local_file_path = os.path.join(temp_terraform_dir, relative_path)
+                
+                # Crea la directory se necessaria
+                os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+                
+                # Salva il file
+                with open(local_file_path, 'wb') as f:
+                    f.write(file_content)
+                
+                downloaded_files += 1
+            
+            if downloaded_files == 0:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'No Terraform files found for this session'
+                }), 404
+            
+            # Inizializza il manager Terraform
+            manager = TerraformManager(temp_terraform_dir)
+            result = manager.init()
+            
+            if result['success']:
+                return jsonify({
+                    'status': 'success',
+                    'message': 'Terraform initialized successfully',
+                    'output': result['output'],
+                    'temp_dir': temp_terraform_dir,
+                    'files_downloaded': downloaded_files
+                })
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Error during Terraform initialization',
+                    'error': result['error']
+                }), 500
+        
+        except Exception as e:
+            # Pulisci la directory temporanea in caso di errore
+            try:
+                shutil.rmtree(temp_terraform_dir)
+            except:
+                pass
+            raise e
     
     except Exception as e:
-        logger.error(f"Errore durante l'inizializzazione Terraform: {e}")
+        logger.error(f"Error during Terraform initialization: {e}")
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -773,13 +1015,28 @@ def terraform_validate():
     Endpoint per validare la configurazione Terraform
     """
     try:
-        terraform_dir = request.json.get('terraformPath')
+        data = request.json
+        session_id = data.get('session_id')
+        temp_dir = data.get('temp_dir')  # Directory temporanea dalla init
         
-        if not terraform_dir or not os.path.exists(terraform_dir):
+        if not session_id:
             return jsonify({
                 'status': 'error', 
-                'message': 'Directory Terraform non valida'
+                'message': 'Session ID required'
             }), 400
+        
+        terraform_dir = temp_dir
+        
+        # Se non abbiamo una directory temporanea, scarica i file da GCS
+        if not terraform_dir or not os.path.exists(terraform_dir):
+            # Usa la stessa logica della init per scaricare i file
+            init_result = terraform_init()
+            init_data = init_result.get_json()
+            
+            if init_data.get('status') != 'success':
+                return init_result
+            
+            terraform_dir = init_data.get('temp_dir')
         
         # Inizializza il manager Terraform
         manager = TerraformManager(terraform_dir)
@@ -788,18 +1045,18 @@ def terraform_validate():
         if result['success']:
             return jsonify({
                 'status': 'success',
-                'message': 'Configurazione Terraform valida',
+                'message': 'Terraform configuration is valid',
                 'output': result['output']
             })
         else:
             return jsonify({
                 'status': 'error',
-                'message': 'Configurazione Terraform non valida',
+                'message': 'Terraform configuration is invalid',
                 'error': result['error']
             }), 400
     
     except Exception as e:
-        logger.error(f"Errore durante la validazione Terraform: {e}")
+        logger.error(f"Error during Terraform validation: {e}")
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -811,25 +1068,40 @@ def terraform_plan():
     Endpoint per eseguire terraform plan
     """
     try:
-        terraform_dir = request.json.get('terraformPath')
+        data = request.json
+        session_id = data.get('session_id')
+        temp_dir = data.get('temp_dir')
         
-        if not terraform_dir or not os.path.exists(terraform_dir):
+        if not session_id:
             return jsonify({
                 'status': 'error', 
-                'message': 'Directory Terraform non valida'
+                'message': 'Session ID required'
             }), 400
+        
+        terraform_dir = temp_dir
+        
+        # Se non abbiamo una directory temporanea, scarica i file da GCS
+        if not terraform_dir or not os.path.exists(terraform_dir):
+            init_result = terraform_init()
+            init_data = init_result.get_json()
+            
+            if init_data.get('status') != 'success':
+                return init_result
+            
+            terraform_dir = init_data.get('temp_dir')
         
         # Inizializza il manager Terraform
         manager = TerraformManager(terraform_dir)
         
-        # Prima inizializza
-        init_result = manager.init()
-        if not init_result['success']:
-            return jsonify({
-                'status': 'error',
-                'message': 'Errore durante l\'inizializzazione di Terraform',
-                'error': init_result['error']
-            }), 500
+        # Prima inizializza se necessario
+        if not os.path.exists(os.path.join(terraform_dir, '.terraform')):
+            init_result = manager.init()
+            if not init_result['success']:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Error during Terraform initialization',
+                    'error': init_result['error']
+                }), 500
         
         # Poi esegui il plan
         plan_result = manager.plan()
@@ -837,7 +1109,7 @@ def terraform_plan():
         if plan_result['success']:
             return jsonify({
                 'status': 'success',
-                'message': 'Plan Terraform completato',
+                'message': 'Terraform plan completed',
                 'has_changes': plan_result['has_changes'],
                 'plan_summary': plan_result['plan_summary'],
                 'plan_file': plan_result['plan_file'],
@@ -846,12 +1118,12 @@ def terraform_plan():
         else:
             return jsonify({
                 'status': 'error',
-                'message': 'Errore durante l\'esecuzione del plan Terraform',
+                'message': 'Error during Terraform plan execution',
                 'error': plan_result['error']
             }), 500
     
     except Exception as e:
-        logger.error(f"Errore durante l'esecuzione di terraform plan: {e}")
+        logger.error(f"Error during terraform plan: {e}")
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -863,21 +1135,35 @@ def terraform_apply():
     Endpoint per eseguire terraform apply
     """
     try:
-        terraform_dir = request.json.get('terraformPath')
-        plan_file = request.json.get('planFile')
-        auto_approve = request.json.get('autoApprove', False)
+        data = request.json
+        session_id = data.get('session_id')
+        temp_dir = data.get('temp_dir')
+        plan_file = data.get('plan_file')
+        auto_approve = data.get('auto_approve', False)
         
-        if not terraform_dir or not os.path.exists(terraform_dir):
+        if not session_id:
             return jsonify({
                 'status': 'error', 
-                'message': 'Directory Terraform non valida'
+                'message': 'Session ID required'
             }), 400
+        
+        terraform_dir = temp_dir
+        
+        # Se non abbiamo una directory temporanea, scarica i file da GCS
+        if not terraform_dir or not os.path.exists(terraform_dir):
+            init_result = terraform_init()
+            init_data = init_result.get_json()
+            
+            if init_data.get('status') != 'success':
+                return init_result
+            
+            terraform_dir = init_data.get('temp_dir')
         
         # Se è specificato un file plan, verifica che esista
         if plan_file and not os.path.exists(plan_file):
             return jsonify({
                 'status': 'error', 
-                'message': 'File di piano Terraform non trovato'
+                'message': 'Terraform plan file not found'
             }), 400
         
         # Inizializza il manager Terraform
@@ -892,19 +1178,19 @@ def terraform_apply():
             
             return jsonify({
                 'status': 'success',
-                'message': 'Infrastruttura Terraform deployata con successo',
+                'message': 'Terraform infrastructure deployed successfully',
                 'output': apply_result['output'],
                 'terraform_outputs': outputs.get('outputs', {}) if outputs['success'] else {}
             })
         else:
             return jsonify({
                 'status': 'error',
-                'message': 'Errore durante il deploy dell\'infrastruttura Terraform',
+                'message': 'Error during Terraform infrastructure deployment',
                 'error': apply_result['error']
             }), 500
     
     except Exception as e:
-        logger.error(f"Errore durante l'esecuzione di terraform apply: {e}")
+        logger.error(f"Error during terraform apply: {e}")
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -916,14 +1202,28 @@ def terraform_destroy():
     Endpoint per eseguire terraform destroy
     """
     try:
-        terraform_dir = request.json.get('terraformPath')
-        auto_approve = request.json.get('autoApprove', False)
+        data = request.json
+        session_id = data.get('session_id')
+        temp_dir = data.get('temp_dir')
+        auto_approve = data.get('auto_approve', False)
         
-        if not terraform_dir or not os.path.exists(terraform_dir):
+        if not session_id:
             return jsonify({
                 'status': 'error', 
-                'message': 'Directory Terraform non valida'
+                'message': 'Session ID required'
             }), 400
+        
+        terraform_dir = temp_dir
+        
+        # Se non abbiamo una directory temporanea, scarica i file da GCS
+        if not terraform_dir or not os.path.exists(terraform_dir):
+            init_result = terraform_init()
+            init_data = init_result.get_json()
+            
+            if init_data.get('status') != 'success':
+                return init_result
+            
+            terraform_dir = init_data.get('temp_dir')
         
         # Inizializza il manager Terraform
         manager = TerraformManager(terraform_dir)
@@ -934,18 +1234,18 @@ def terraform_destroy():
         if destroy_result['success']:
             return jsonify({
                 'status': 'success',
-                'message': 'Infrastruttura Terraform distrutta con successo',
+                'message': 'Terraform infrastructure destroyed successfully',
                 'output': destroy_result['output']
             })
         else:
             return jsonify({
                 'status': 'error',
-                'message': 'Errore durante la distruzione dell\'infrastruttura Terraform',
+                'message': 'Error during Terraform infrastructure destruction',
                 'error': destroy_result['error']
             }), 500
     
     except Exception as e:
-        logger.error(f"Errore durante l'esecuzione di terraform destroy: {e}")
+        logger.error(f"Error during terraform destroy: {e}")
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -957,34 +1257,66 @@ def terraform_status():
     Endpoint per verificare lo stato attuale dell'infrastruttura Terraform
     """
     try:
-        terraform_dir = request.args.get('terraformPath')
+        session_id = request.args.get('session_id')
+        temp_dir = request.args.get('temp_dir')
         
-        if not terraform_dir or not os.path.exists(terraform_dir):
+        if not session_id:
             return jsonify({
                 'status': 'error', 
-                'message': 'Directory Terraform non valida'
+                'message': 'Session ID required'
             }), 400
         
-        # Inizializza il manager Terraform
-        manager = TerraformManager(terraform_dir)
+        terraform_dir = temp_dir
         
-        # Verifica se è stato già inizializzato
+        # Verifica se ci sono file Terraform su GCS per questa sessione
+        terraform_prefix = f"results/{session_id}/terraform/"
+        terraform_blobs = list(bucket.list_blobs(prefix=terraform_prefix, max_results=1))
+        has_terraform_files = len(terraform_blobs) > 0
+        
+        if not has_terraform_files:
+            return jsonify({
+                'status': 'success',
+                'has_terraform_files': False,
+                'is_initialized': False,
+                'is_deployed': False,
+                'outputs': {}
+            })
+        
+        # Se non abbiamo una directory temporanea locale, lo stato è basato solo sui file GCS
+        if not terraform_dir or not os.path.exists(terraform_dir):
+            return jsonify({
+                'status': 'success',
+                'has_terraform_files': True,
+                'is_initialized': False,
+                'is_deployed': False,
+                'outputs': {},
+                'message': 'Terraform files available on cloud storage, but not initialized locally'
+            })
+        
+        # Verifica se è stato già inizializzato localmente
         init_dir = os.path.join(terraform_dir, ".terraform")
         is_initialized = os.path.exists(init_dir)
         
         # Cerca di ottenere gli output (funziona solo se è stato fatto apply)
-        outputs_result = manager.get_outputs()
-        is_deployed = outputs_result['success']
+        is_deployed = False
+        outputs = {}
+        
+        if is_initialized:
+            manager = TerraformManager(terraform_dir)
+            outputs_result = manager.get_outputs()
+            is_deployed = outputs_result['success']
+            outputs = outputs_result.get('outputs', {}) if is_deployed else {}
         
         return jsonify({
             'status': 'success',
+            'has_terraform_files': True,
             'is_initialized': is_initialized,
             'is_deployed': is_deployed,
-            'outputs': outputs_result.get('outputs', {}) if is_deployed else {}
+            'outputs': outputs
         })
     
     except Exception as e:
-        logger.error(f"Errore durante il recupero dello stato Terraform: {e}")
+        logger.error(f"Error getting Terraform status: {e}")
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -997,12 +1329,13 @@ def get_status():
         'status': 'running',
         'service': 'autonetgen-backend',
         'version': '1.0.0',
-        'bucket': GCS_BUCKET_NAME
+        'bucket': GCS_BUCKET_NAME,
+        'storage_mode': 'cloud'
     })
         
 if __name__ == '__main__':
-    # Assicurati che la directory di output esista
-    os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
+    # Assicurati che la directory temporanea esista
+    os.makedirs(TEMP_DIR, exist_ok=True)
     
     # Avvia il server Flask
     port = int(os.environ.get('PORT', 8080))

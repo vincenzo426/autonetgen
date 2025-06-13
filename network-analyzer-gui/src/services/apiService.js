@@ -5,7 +5,7 @@ const API_URL =
 
 /**
  * Servizio per comunicare con il backend API
- * Aggiornato per supportare Google Cloud Storage con Signed URLs
+ * Aggiornato per supportare Google Cloud Storage con risultati salvati nel cloud
  */
 const apiService = {
   /**
@@ -387,10 +387,6 @@ const apiService = {
         blob_names: blobNames,
         session_id: sessionId,
         type: options.type || "auto",
-        output_dir: options.output_dir || "output",
-        output_graph: options.output_graph,
-        output_analysis: options.output_analysis,
-        output_terraform: options.output_terraform,
       };
 
       const response = await fetch(`${API_URL}/analyze`, {
@@ -419,7 +415,7 @@ const apiService = {
   },
 
   /**
-   * Pulisce i file di una sessione
+   * Pulisce i file di una sessione (upload e risultati)
    * @param {string} sessionId - ID della sessione da pulire
    * @returns {Promise<Object>} Risultato della pulizia
    */
@@ -516,62 +512,95 @@ const apiService = {
   },
 
   /**
-   * Scarica un file dal server
+   * Ottiene informazioni di download per un file generato dall'analisi
    * @param {string} fileType - Tipo di file da scaricare (graph, analysis, terraform)
-   * @param {string} filePath - Percorso del file sul server
-   * @returns {Promise<void>} Avvia il download del file
+   * @param {string} sessionId - ID della sessione
+   * @param {string} blobName - Nome del blob (opzionale, calcolato automaticamente se non fornito)
+   * @returns {Promise<Object>} Informazioni per il download
    */
-  downloadFile: async (fileType, filePath) => {
+  getDownloadInfo: async (fileType, sessionId, blobName = null) => {
     try {
-      // Costruisci l'URL per il download
-      const downloadUrl = `${API_URL}/download/${fileType}?path=${encodeURIComponent(
-        filePath
-      )}`;
+      console.log(
+        `Getting download info for ${fileType}, session: ${sessionId}`
+      );
 
-      // Utilizza il metodo fetch in modalità 'no-cors' per ottenere il file
-      const response = await fetch(downloadUrl);
+      const params = new URLSearchParams({
+        session_id: sessionId,
+      });
+
+      if (blobName) {
+        params.append("blob_name", blobName);
+      }
+
+      const response = await fetch(`${API_URL}/download/${fileType}?${params}`);
 
       if (!response.ok) {
-        // Se la risposta è un JSON di errore
-        if (
-          response.headers.get("content-type")?.includes("application/json")
-        ) {
-          const errorData = await response.json();
-          throw new Error(
-            errorData.message || `HTTP error! Status: ${response.status}`
-          );
-        }
-        throw new Error(`HTTP error! Status: ${response.status}`);
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || `HTTP error! Status: ${response.status}`
+        );
+      }
+
+      const result = await response.json();
+      console.log("Download info retrieved:", result);
+
+      return result;
+    } catch (error) {
+      console.error(`Failed to get download info for ${fileType}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Scarica un file dall'analisi usando le informazioni di download
+   * @param {string} fileType - Tipo di file da scaricare (graph, analysis, terraform)
+   * @param {string} sessionId - ID della sessione
+   * @param {string} blobName - Nome del blob (opzionale)
+   * @returns {Promise<void>} Avvia il download del file
+   */
+  downloadFile: async (fileType, sessionId, blobName = null) => {
+    try {
+      console.log(`Starting download for ${fileType}`);
+
+      // Per Terraform, usa il download diretto dal backend che crea lo ZIP
+      if (fileType === "terraform") {
+        const downloadUrl = `${API_URL}/download/terraform?session_id=${encodeURIComponent(
+          sessionId
+        )}`;
+
+        // Crea un link temporaneo per il download
+        const a = document.createElement("a");
+        a.style.display = "none";
+        a.href = downloadUrl;
+        a.download = "terraform_config.zip";
+
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        return;
+      }
+
+      // Per altri tipi di file, ottieni le informazioni di download
+      const downloadInfo = await apiService.getDownloadInfo(
+        fileType,
+        sessionId,
+        blobName
+      );
+
+      if (downloadInfo.status !== "success" || !downloadInfo.download_url) {
+        throw new Error("Failed to get download URL");
+      }
+
+      // Scarica il file usando la signed URL
+      const response = await fetch(downloadInfo.download_url);
+
+      if (!response.ok) {
+        throw new Error(`Download failed with status ${response.status}`);
       }
 
       // Ottieni il blob del file
       const fileBlob = await response.blob();
-
-      // Determina il nome del file
-      let fileName;
-      const contentDisposition = response.headers.get("content-disposition");
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
-        if (filenameMatch && filenameMatch[1]) {
-          fileName = filenameMatch[1];
-        }
-      }
-
-      if (!fileName) {
-        switch (fileType) {
-          case "graph":
-            fileName = "network_graph.pdf";
-            break;
-          case "analysis":
-            fileName = "network_analysis.json";
-            break;
-          case "terraform":
-            fileName = "terraform_config.zip";
-            break;
-          default:
-            fileName = "download";
-        }
-      }
 
       // Crea un URL per il download
       const url = window.URL.createObjectURL(fileBlob);
@@ -580,13 +609,15 @@ const apiService = {
       const a = document.createElement("a");
       a.style.display = "none";
       a.href = url;
-      a.download = fileName;
+      a.download = downloadInfo.filename || `download_${fileType}`;
 
       // Aggiungi l'elemento al DOM, avvia il download e rimuovi l'elemento
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+
+      console.log(`Download completed for ${fileType}`);
     } catch (error) {
       console.error(`Download failed for ${fileType}:`, error);
       throw error;
@@ -594,14 +625,14 @@ const apiService = {
   },
 
   /**
-   * Recupera la lista dei file Terraform generati
-   * @param {string} terraformPath - Percorso della directory Terraform
+   * Recupera la lista dei file Terraform generati da GCS
+   * @param {string} sessionId - ID della sessione
    * @returns {Promise<Object>} Lista dei file Terraform
    */
-  getTerraformFiles: async (terraformPath) => {
+  getTerraformFiles: async (sessionId) => {
     try {
       const response = await fetch(
-        `${API_URL}/terraform/files?path=${encodeURIComponent(terraformPath)}`
+        `${API_URL}/terraform/files?session_id=${encodeURIComponent(sessionId)}`
       );
 
       if (!response.ok) {
@@ -619,16 +650,14 @@ const apiService = {
   },
 
   /**
-   * Recupera il contenuto di un file Terraform
-   * @param {string} terraformPath - Percorso della directory Terraform
-   * @param {string} fileName - Nome del file
+   * Recupera il contenuto di un file Terraform da GCS
+   * @param {string} blobName - Nome del blob su GCS
    * @returns {Promise<Object>} Contenuto del file
    */
-  getTerraformFileContent: async (terraformPath, fileName) => {
+  getTerraformFileContent: async (blobName) => {
     try {
-      const encodedPath = encodeURIComponent(`${terraformPath}/${fileName}`);
       const response = await fetch(
-        `${API_URL}/terraform/content?path=${encodedPath}`
+        `${API_URL}/terraform/content?blob_name=${encodeURIComponent(blobName)}`
       );
 
       if (!response.ok) {
@@ -640,19 +669,18 @@ const apiService = {
 
       return await response.json();
     } catch (error) {
-      console.error(`Failed to get content for file ${fileName}:`, error);
+      console.error(`Failed to get content for blob ${blobName}:`, error);
       throw error;
     }
   },
 
   /**
-   * Salva le modifiche a un file Terraform
-   * @param {string} terraformPath - Percorso della directory Terraform
-   * @param {string} fileName - Nome del file
+   * Salva le modifiche a un file Terraform su GCS
+   * @param {string} blobName - Nome del blob su GCS
    * @param {string} content - Nuovo contenuto del file
    * @returns {Promise<Object>} Risultato dell'operazione
    */
-  saveTerraformFile: async (terraformPath, fileName, content) => {
+  saveTerraformFile: async (blobName, content) => {
     try {
       const response = await fetch(`${API_URL}/terraform/save`, {
         method: "POST",
@@ -660,7 +688,7 @@ const apiService = {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          path: `${terraformPath}/${fileName}`,
+          blob_name: blobName,
           content: content,
         }),
       });
@@ -674,24 +702,24 @@ const apiService = {
 
       return await response.json();
     } catch (error) {
-      console.error(`Failed to save file ${fileName}:`, error);
+      console.error(`Failed to save blob ${blobName}:`, error);
       throw error;
     }
   },
 
   /**
-   * Inizializza Terraform nella directory specificata
-   * @param {string} terraformPath - Percorso della directory Terraform
+   * Inizializza Terraform scaricando i file da GCS
+   * @param {string} sessionId - ID della sessione
    * @returns {Promise<Object>} Risultato dell'operazione
    */
-  initTerraform: async (terraformPath) => {
+  initTerraform: async (sessionId) => {
     try {
       const response = await fetch(`${API_URL}/terraform/init`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ terraformPath }),
+        body: JSON.stringify({ session_id: sessionId }),
       });
 
       if (!response.ok) {
@@ -710,17 +738,23 @@ const apiService = {
 
   /**
    * Valida la configurazione Terraform
-   * @param {string} terraformPath - Percorso della directory Terraform
+   * @param {string} sessionId - ID della sessione
+   * @param {string} tempDir - Directory temporanea (opzionale)
    * @returns {Promise<Object>} Risultato della validazione
    */
-  validateTerraform: async (terraformPath) => {
+  validateTerraform: async (sessionId, tempDir = null) => {
     try {
+      const requestData = { session_id: sessionId };
+      if (tempDir) {
+        requestData.temp_dir = tempDir;
+      }
+
       const response = await fetch(`${API_URL}/terraform/validate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ terraformPath }),
+        body: JSON.stringify(requestData),
       });
 
       if (!response.ok) {
@@ -739,17 +773,23 @@ const apiService = {
 
   /**
    * Esegue terraform plan
-   * @param {string} terraformPath - Percorso della directory Terraform
+   * @param {string} sessionId - ID della sessione
+   * @param {string} tempDir - Directory temporanea (opzionale)
    * @returns {Promise<Object>} Risultato del plan
    */
-  planTerraform: async (terraformPath) => {
+  planTerraform: async (sessionId, tempDir = null) => {
     try {
+      const requestData = { session_id: sessionId };
+      if (tempDir) {
+        requestData.temp_dir = tempDir;
+      }
+
       const response = await fetch(`${API_URL}/terraform/plan`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ terraformPath }),
+        body: JSON.stringify(requestData),
       });
 
       if (!response.ok) {
@@ -768,27 +808,38 @@ const apiService = {
 
   /**
    * Esegue terraform apply
-   * @param {string} terraformPath - Percorso della directory Terraform
+   * @param {string} sessionId - ID della sessione
+   * @param {string} tempDir - Directory temporanea (opzionale)
    * @param {string} planFile - File del piano Terraform (opzionale)
    * @param {boolean} autoApprove - Se approvare automaticamente il piano
    * @returns {Promise<Object>} Risultato dell'operazione apply
    */
   applyTerraform: async (
-    terraformPath,
+    sessionId,
+    tempDir = null,
     planFile = null,
     autoApprove = false
   ) => {
     try {
+      const requestData = {
+        session_id: sessionId,
+        auto_approve: autoApprove,
+      };
+
+      if (tempDir) {
+        requestData.temp_dir = tempDir;
+      }
+
+      if (planFile) {
+        requestData.plan_file = planFile;
+      }
+
       const response = await fetch(`${API_URL}/terraform/apply`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          terraformPath,
-          planFile,
-          autoApprove,
-        }),
+        body: JSON.stringify(requestData),
       });
 
       if (!response.ok) {
@@ -807,21 +858,28 @@ const apiService = {
 
   /**
    * Esegue terraform destroy
-   * @param {string} terraformPath - Percorso della directory Terraform
+   * @param {string} sessionId - ID della sessione
+   * @param {string} tempDir - Directory temporanea (opzionale)
    * @param {boolean} autoApprove - Se approvare automaticamente la distruzione
    * @returns {Promise<Object>} Risultato dell'operazione destroy
    */
-  destroyTerraform: async (terraformPath, autoApprove = false) => {
+  destroyTerraform: async (sessionId, tempDir = null, autoApprove = false) => {
     try {
+      const requestData = {
+        session_id: sessionId,
+        auto_approve: autoApprove,
+      };
+
+      if (tempDir) {
+        requestData.temp_dir = tempDir;
+      }
+
       const response = await fetch(`${API_URL}/terraform/destroy`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          terraformPath,
-          autoApprove,
-        }),
+        body: JSON.stringify(requestData),
       });
 
       if (!response.ok) {
@@ -840,16 +898,21 @@ const apiService = {
 
   /**
    * Verifica lo stato attuale dell'infrastruttura Terraform
-   * @param {string} terraformPath - Percorso della directory Terraform
+   * @param {string} sessionId - ID della sessione
+   * @param {string} tempDir - Directory temporanea (opzionale)
    * @returns {Promise<Object>} Stato dell'infrastruttura
    */
-  getTerraformStatus: async (terraformPath) => {
+  getTerraformStatus: async (sessionId, tempDir = null) => {
     try {
-      const response = await fetch(
-        `${API_URL}/terraform/status?terraformPath=${encodeURIComponent(
-          terraformPath
-        )}`
-      );
+      const params = new URLSearchParams({
+        session_id: sessionId,
+      });
+
+      if (tempDir) {
+        params.append("temp_dir", tempDir);
+      }
+
+      const response = await fetch(`${API_URL}/terraform/status?${params}`);
 
       if (!response.ok) {
         const errorData = await response.json();
