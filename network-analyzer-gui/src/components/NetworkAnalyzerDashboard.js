@@ -284,11 +284,7 @@ export default function NetworkAnalyzerDashboard() {
     addNotification(`Preparing ${type} export...`, "info");
 
     try {
-      if (
-        isServerAvailable &&
-        analysisResults &&
-        analysisResults.output_paths
-      ) {
+      if (isServerAvailable && analysisResults) {
         // Se il server è disponibile, scarica il file
         await apiService.downloadFile(type, sessionId);
         addNotification(`${type} exported successfully`, "success");
