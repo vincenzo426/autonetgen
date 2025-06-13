@@ -290,7 +290,7 @@ export default function NetworkAnalyzerDashboard() {
         analysisResults.output_paths
       ) {
         // Se il server è disponibile, scarica il file
-        await apiService.downloadFile(type, analysisResults.output_paths[type]);
+        await apiService.downloadFile(type, sessionId);
         addNotification(`${type} exported successfully`, "success");
       } else {
         throw new Error(
