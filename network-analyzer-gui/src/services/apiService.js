@@ -816,7 +816,7 @@ const apiService = {
    */
   applyTerraform: async (
     sessionId,
-    tempDir = null,
+    //tempDir = null,
     planFile = null,
     autoApprove = false
   ) => {
@@ -826,9 +826,9 @@ const apiService = {
         auto_approve: autoApprove,
       };
 
-      if (tempDir) {
+      /*if (tempDir) {
         requestData.temp_dir = tempDir;
-      }
+      }*/
 
       if (planFile) {
         requestData.plan_file = planFile;
