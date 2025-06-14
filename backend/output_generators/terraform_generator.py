@@ -274,7 +274,7 @@ output "original_to_gcp_mapping" {
             
             for host in host_roles:
                 host_safe = host.replace('.', '-')
-                f.write(f'    "{host}" = "${{google_compute_instance.host_{host_safe}.network_interface[0].network_ip}}"\n')
+                f.write(f'    "{host}" = "${{google_compute_instance.host-{host_safe}.network_interface[0].network_ip}}"\n')
             
             f.write("""
   }
