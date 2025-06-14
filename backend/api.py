@@ -512,8 +512,24 @@ def analyze():
                     # Scarica il file da GCS in memoria
                     file_content = GCSFileManager.download_file_to_memory(blob_name)
                     
-                    # Crea un file temporaneo per l'analisi
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as temp_file:
+                    # Determina l'estensione dal nome del file
+                    file_extension = os.path.splitext(blob_name)[1].lower()
+
+                    # Mappa le estensioni supportate
+                    supported_extensions = {'.pcap', '.csv', '.netflow'}
+
+                    # Verifica se l'estensione è supportata, altrimenti usa un default
+                    if file_extension in supported_extensions:
+                        suffix = file_extension
+                    else:
+                        # Opzionale: solleva un'eccezione se l'estensione non è supportata
+                        # raise ValueError(f"Estensione file non supportata: {file_extension}")
+                        
+                        # Oppure usa un'estensione di default (esempio: .pcap)
+                        suffix = '.pcap'
+
+                    # Crea un file temporaneo per l'analisi con l'estensione corretta
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
                         temp_file.write(file_content)
                         temp_file_path = temp_file.name
                     

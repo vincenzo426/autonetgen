@@ -545,19 +545,19 @@ const DeployControls = ({
         <div className="grid grid-cols-3 gap-4 text-sm">
           <div className="text-center">
             <div className="text-green-600 font-semibold">
-              {planSummary.to_add || 0}
+              {planSummary.add || 0}
             </div>
             <div className="text-gray-600">to add</div>
           </div>
           <div className="text-center">
             <div className="text-yellow-600 font-semibold">
-              {planSummary.to_change || 0}
+              {planSummary.change || 0}
             </div>
             <div className="text-gray-600">to change</div>
           </div>
           <div className="text-center">
             <div className="text-red-600 font-semibold">
-              {planSummary.to_destroy || 0}
+              {planSummary.destroy || 0}
             </div>
             <div className="text-gray-600">to destroy</div>
           </div>
