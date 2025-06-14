@@ -80,9 +80,9 @@ ROLE_SHAPES = {
 }
 
 # Configurazioni Terraform
-GCP_PROJECT_ID = "744895722272"
-GCP_REGION = "europe-west1"
-GCP_ZONE = "europe-west1-b"
+GCP_PROJECT_ID = "gruppo-10"
+GCP_REGION = "us-central1"
+#GCP_ZONE = "us-central1-a"
 
 # Configurazioni per l'analisi
 DEFAULT_OUTPUT_DIR = "output"

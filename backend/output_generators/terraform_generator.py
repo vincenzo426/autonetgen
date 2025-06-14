@@ -114,7 +114,7 @@ resource "google_compute_subnetwork" "{subnet_name}" {{
             firewall_rules = []
             
             for host, role in host_roles.items():
-                host_safe = host.replace('.', '_')
+                host_safe = host.replace('.', '-')
                 subnet = subnets.get(host, list(unique_subnets)[0] if unique_subnets else "unknown")
                 subnet_resource = gcp_subnet_map.get(subnet, {"name": "subnet-1", "cidr": "10.1.0.0/24"})
                 
@@ -226,7 +226,7 @@ resource "google_compute_firewall" "{fw_name}" {{
                 
                 # Crea l'istanza VM
                 f.write(f"""
-resource "google_compute_instance" "host_{host_safe}" {{
+resource "google_compute_instance" "host-{host_safe}" {{
   name         = "host-{host_safe}"
   machine_type = "{machine_type}"
   zone         = "us-central1-a"
@@ -273,7 +273,7 @@ output "original_to_gcp_mapping" {
 """)
             
             for host in host_roles:
-                host_safe = host.replace('.', '_')
+                host_safe = host.replace('.', '-')
                 f.write(f'    "{host}" = "${{google_compute_instance.host_{host_safe}.network_interface[0].network_ip}}"\n')
             
             f.write("""
