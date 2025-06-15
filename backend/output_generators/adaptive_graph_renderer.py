@@ -38,7 +38,7 @@ class PerformanceConfig:
                 "max_label_length": 50,
                 "show_ports": True,
                 "clustering": True,
-                "formats": ["pdf", "png"],
+                "formats": ["pdf"],
                 "layout_engine": "dot"
             },
             "medium": {
@@ -46,7 +46,7 @@ class PerformanceConfig:
                 "max_label_length": 30,
                 "show_ports": False,
                 "clustering": True,
-                "formats": ["png"],
+                "formats": ["pdf"],
                 "layout_engine": "neato"
             },
             "large": {
@@ -54,7 +54,7 @@ class PerformanceConfig:
                 "max_label_length": 15,
                 "show_ports": False,
                 "clustering": False,
-                "formats": ["html", "png"],
+                "formats": ["html", "pdf"],
                 "simplify_threshold": 0.7
             },
             "huge": {
@@ -478,7 +478,7 @@ class OptimizedGraphvizRenderer(BaseGraphRenderer):
         """Crea un oggetto Graphviz ottimizzato"""
         dot = graphviz.Digraph(
             comment='Network Analysis - Optimized',
-            format='png',  # Solo PNG per velocità
+            format='pdf',  # Solo PNG per velocità
             engine=self.config.get('layout_engine', 'neato'),
             strict=True
         )
@@ -747,30 +747,3 @@ class AdaptiveGraphRenderer:
         
         logger.error("Tutti i renderer fallback falliti")
         return None
-
-
-# Esempio di utilizzo
-if __name__ == "__main__":
-    # Test del sistema adattivo
-    import networkx as nx
-    
-    # Crea un grafo di test
-    G = nx.erdos_renyi_graph(100, 0.1, directed=True)
-    
-    # Aggiungi attributi simulati
-    for node in G.nodes():
-        G.nodes[node]['role'] = 'SERVER' if node % 3 == 0 else 'CLIENT'
-        G.nodes[node]['subnet'] = f"192.168.{node//20}.0/24"
-    
-    for src, dst in G.edges():
-        G.edges[src, dst]['weight'] = 1
-        G.edges[src, dst]['protocols'] = ['TCP']
-    
-    # Test del renderer adattivo
-    renderer = AdaptiveGraphRenderer()
-    result = renderer.render_graph(G, "test_output.png", file_size_mb=25)
-    
-    if result:
-        print(f"Grafo generato: {result}")
-    else:
-        print("Generazione fallita")
