@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-AnalysisOrchestrator - classe principale che coordina l'analisi e la generazione degli output
+AnalysisOrchestrator Aggiornato - Integra il sistema adattivo di rendering
 """
 
 import os
+import time
 from config import logger, DEFAULT_OUTPUT_DIR
 from network_analyzer import NetworkAnalyzer
 from network_enricher import NetworkEnricher
@@ -12,8 +13,9 @@ from output_generators.graphviz_generator import GraphvizGenerator
 from output_generators.terraform_generator import TerraformGenerator
 from output_generators.json_exporter import JSONExporter
 
+
 class AnalysisOrchestrator:
-    """Classe principale che coordina l'analisi e la generazione degli output"""
+    """Orchestratore aggiornato con supporto per il sistema adattivo"""
     
     def __init__(self, config=None):
         """
@@ -27,9 +29,15 @@ class AnalysisOrchestrator:
         self.enricher = NetworkEnricher()
         self.output_generators = []
         
-    def run(self, input_file, file_type=None, output_dir=DEFAULT_OUTPUT_DIR, output_graph=None, output_analysis=None, output_terraform=None):
+        # Metriche di performance
+        self.start_time = None
+        self.file_size_mb = 0
+        self.performance_metrics = {}
+        
+    def run(self, input_file, file_type=None, output_dir=DEFAULT_OUTPUT_DIR, 
+            output_graph=None, output_analysis=None, output_terraform=None):
         """
-        Esegue l'analisi completa e genera gli output
+        Esegue l'analisi completa con ottimizzazioni adattive
         
         Args:
             input_file (str): File di input da analizzare
@@ -42,27 +50,77 @@ class AnalysisOrchestrator:
         Returns:
             bool: True se l'analisi è riuscita, False altrimenti
         """
+        self.start_time = time.time()
+        
+        # Calcola dimensione del file
+        self.file_size_mb = self._get_file_size_mb(input_file)
+        logger.info(f"=== INIZIO ANALISI ADATTIVA ===")
+        logger.info(f"File: {input_file} ({self.file_size_mb}MB)")
+        
         # Crea la directory di output se non esiste
         os.makedirs(output_dir, exist_ok=True)
         
         # Determina automaticamente il tipo di file se non specificato
-        logger.info("File di input: %s", file_type)
         if file_type is None or file_type == 'auto':
-            file_ext = os.path.splitext(input_file)[1].lower()
-            if file_ext == '.pcap' or file_ext == '.pcapng':
-                logger.info("File di input di tipo PCAP")
-                file_type = 'pcap'
-            elif file_ext == '.csv':
-                file_type = 'csv'
-            elif file_ext == '.nflow' or file_ext == '.nfcapd':
-                file_type = 'netflow'
-            else:
-                logger.warning(f"Impossibile determinare automaticamente il tipo di file, assumendo CSV: {input_file}")
-                file_type = 'csv'
+            file_type = self._detect_file_type(input_file)
         
-        logger.info(f"Avvio dell'analisi del file {input_file} di tipo {file_type}")
+        logger.info(f"Tipo file rilevato: {file_type}")
         
-        # Analizza il file di input
+        # FASE 1: Analisi del file di input
+        success = self._run_analysis_phase(input_file, file_type)
+        if not success:
+            logger.error("=== ANALISI FALLITA ===")
+            return False
+        
+        # FASE 2: Arricchimento dei dati
+        success = self._run_enrichment_phase()
+        if not success:
+            logger.error("=== ARRICCHIMENTO FALLITO ===")
+            return False
+        
+        # FASE 3: Generazione output con sistema adattivo
+        success = self._run_output_generation_phase(
+            output_dir, output_graph, output_analysis, output_terraform
+        )
+        
+        # Riepilogo finale
+        elapsed_total = time.time() - self.start_time
+        logger.info(f"=== ANALISI COMPLETATA in {elapsed_total:.2f}s ===")
+        
+        if success:
+            self._log_final_summary()
+        
+        return success
+    
+    def _get_file_size_mb(self, file_path):
+        """Calcola la dimensione del file in MB"""
+        try:
+            size_bytes = os.path.getsize(file_path)
+            size_mb = size_bytes / (1024 * 1024)
+            return round(size_mb, 2)
+        except Exception as e:
+            logger.warning(f"Impossibile determinare dimensione file: {e}")
+            return 0
+    
+    def _detect_file_type(self, input_file):
+        """Rileva automaticamente il tipo di file"""
+        file_ext = os.path.splitext(input_file)[1].lower()
+        
+        if file_ext in ['.pcap', '.pcapng']:
+            return 'pcap'
+        elif file_ext == '.csv':
+            return 'csv'
+        elif file_ext in ['.nflow', '.nfcapd']:
+            return 'netflow'
+        else:
+            logger.warning(f"Estensione sconosciuta {file_ext}, assumendo CSV")
+            return 'csv'
+    
+    def _run_analysis_phase(self, input_file, file_type):
+        """Esegue la fase di analisi del file"""
+        phase_start = time.time()
+        logger.info("FASE 1: Analisi file in corso...")
+        
         success = False
         if file_type == 'pcap':
             logger.info("Analisi del file PCAP in corso...")
@@ -74,61 +132,205 @@ class AnalysisOrchestrator:
             logger.info("Analisi del file NetFlow in corso...")
             success = self.analyzer.analyze_netflow_file(input_file)
         
-        if not success:
-            logger.error("Analisi del file di input fallita")
+        phase_elapsed = time.time() - phase_start
+        self.performance_metrics['analysis_time'] = phase_elapsed
+        
+        if success:
+            logger.info(f"FASE 1 completata in {phase_elapsed:.2f}s")
+            logger.info(f"Host rilevati: {len(self.analyzer.hosts)}")
+            logger.info(f"Connessioni: {len(self.analyzer.connections)}")
+        else:
+            logger.error(f"FASE 1 fallita dopo {phase_elapsed:.2f}s")
+        
+        return success
+    
+    def _run_enrichment_phase(self):
+        """Esegue la fase di arricchimento dati"""
+        phase_start = time.time()
+        logger.info("FASE 2: Arricchimento dati in corso...")
+        
+        try:
+            # Arricchisci i dati con informazioni aggiuntive
+            subnets = self.enricher.identify_subnets(list(self.analyzer.hosts))
+            self.analyzer.subnets = subnets
+            
+            # Inferisci i ruoli degli host
+            self.analyzer.infer_host_roles()
+            
+            # Costruisci il grafo di rete
+            self.analyzer.build_network_graph()
+            
+            phase_elapsed = time.time() - phase_start
+            self.performance_metrics['enrichment_time'] = phase_elapsed
+            
+            logger.info(f"FASE 2 completata in {phase_elapsed:.2f}s")
+            logger.info(f"Subnet identificate: {len(subnets)}")
+            logger.info(f"Grafo: {self.analyzer.network_graph.number_of_nodes()} nodi, "
+                       f"{self.analyzer.network_graph.number_of_edges()} archi")
+            
+            return True
+            
+        except Exception as e:
+            phase_elapsed = time.time() - phase_start
+            logger.error(f"FASE 2 fallita dopo {phase_elapsed:.2f}s: {e}")
             return False
+    
+    def _run_output_generation_phase(self, output_dir, output_graph, output_analysis, output_terraform):
+        """Esegue la fase di generazione output con sistema adattivo"""
+        phase_start = time.time()
+        logger.info("FASE 3: Generazione output adattiva in corso...")
         
-        # Arricchisci i dati con informazioni aggiuntive
-        subnets = self.enricher.identify_subnets(self.analyzer.network_data)
-        host_roles = self.enricher.enrich_host_roles(self.analyzer.network_data)
-        
-        # Aggiorna l'analyzer con i dati arricchiti
-        self.analyzer.subnets = subnets
-        self.analyzer.host_roles = host_roles
-        
-        # Costruisci il grafo della rete
-        self.analyzer.build_network_graph()
-        
-        # Prepara i percorsi di output
-        if output_graph is None:
-            output_graph = os.path.join(output_dir, "network_graph.pdf")
-            
-        if output_analysis is None:
-            output_analysis = os.path.join(output_dir, "network_analysis.json")
-            
-        if output_terraform is None:
-            output_terraform = os.path.join(output_dir, "terraform")
-        
-        # Prepara il generatore di output
-        output_generator = OutputGenerator()
-        
-        # Aggiungi i generatori di output
-        output_generator.add_generator(GraphvizGenerator())
-        output_generator.add_generator(TerraformGenerator())
-        output_generator.add_generator(JSONExporter())
-        
-        # Prepara i dati per i generatori
+        success = True
         data = self.analyzer.get_data()
         
-        # Aggiorna i dati con le informazioni aggiuntive
-        data.update({
-            'host_roles': host_roles,
-            'subnets': subnets,
-            'output_path': output_dir
-        })
+        # Genera il grafo con sistema adattivo
+        if output_graph:
+            success &= self._generate_adaptive_graph(data, output_graph)
         
-        # Genera gli output
-        output_paths = {
-            'graph': output_graph,
-            'terraform': output_terraform,
-            'json': output_analysis
-        }
+        # Genera analisi JSON
+        if output_analysis:
+            success &= self._generate_analysis_output(data, output_analysis)
         
-        results = output_generator.generate(data, output_paths)
+        # Genera configurazione Terraform
+        if output_terraform:
+            success &= self._generate_terraform_output(data, output_terraform)
         
-        if results:
-            logger.info("Analisi completata con successo!")
-            return True
-        else:
-            logger.error("Generazione degli output fallita")
+        phase_elapsed = time.time() - phase_start
+        self.performance_metrics['output_time'] = phase_elapsed
+        
+        logger.info(f"FASE 3 completata in {phase_elapsed:.2f}s")
+        return success
+    
+    def _generate_adaptive_graph(self, data, output_path):
+        """Genera il grafo usando il sistema adattivo"""
+        try:
+            logger.info("Generazione grafo adattivo...")
+            
+            # Crea il generatore e imposta la dimensione del file
+            generator = GraphvizGenerator()
+            generator.set_original_file_size(self.file_size_mb)
+            
+            # Genera il grafo
+            result = generator.generate(data, output_path)
+            
+            if result:
+                logger.info(f"Grafo generato con successo: {result}")
+                return True
+            else:
+                logger.error("Generazione grafo fallita")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Errore nella generazione grafo: {e}")
             return False
+    
+    def _generate_analysis_output(self, data, output_path):
+        """Genera l'output di analisi JSON"""
+        try:
+            logger.info("Generazione analisi JSON...")
+            
+            generator = JSONExporter()
+            result = generator.generate(data, output_path)
+            
+            if result:
+                logger.info(f"Analisi JSON generata: {result}")
+                return True
+            else:
+                logger.error("Generazione analisi JSON fallita")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Errore nella generazione analisi: {e}")
+            return False
+    
+    def _generate_terraform_output(self, data, output_path):
+        """Genera la configurazione Terraform"""
+        try:
+            logger.info("Generazione configurazione Terraform...")
+            
+            generator = TerraformGenerator()
+            result = generator.generate(data, output_path)
+            
+            if result:
+                logger.info(f"Terraform generato: {result}")
+                return True
+            else:
+                logger.error("Generazione Terraform fallita")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Errore nella generazione Terraform: {e}")
+            return False
+    
+    def _log_final_summary(self):
+        """Log del riepilogo finale dell'analisi"""
+        total_time = time.time() - self.start_time
+        
+        logger.info("=== RIEPILOGO FINALE ===")
+        logger.info(f"File analizzato: {self.file_size_mb}MB")
+        logger.info(f"Tempo totale: {total_time:.2f}s")
+        
+        if 'analysis_time' in self.performance_metrics:
+            logger.info(f"- Analisi file: {self.performance_metrics['analysis_time']:.2f}s")
+        
+        if 'enrichment_time' in self.performance_metrics:
+            logger.info(f"- Arricchimento: {self.performance_metrics['enrichment_time']:.2f}s")
+        
+        if 'output_time' in self.performance_metrics:
+            logger.info(f"- Generazione output: {self.performance_metrics['output_time']:.2f}s")
+        
+        # Calcola velocità di processing
+        if self.file_size_mb > 0:
+            speed = self.file_size_mb / total_time
+            logger.info(f"Velocità di processing: {speed:.2f}MB/s")
+        
+        # Host e connessioni analizzati
+        logger.info(f"Host analizzati: {len(self.analyzer.hosts)}")
+        logger.info(f"Connessioni: {len(self.analyzer.connections)}")
+        
+        # Grafo finale
+        if hasattr(self.analyzer, 'network_graph'):
+            logger.info(f"Grafo finale: {self.analyzer.network_graph.number_of_nodes()} nodi, "
+                       f"{self.analyzer.network_graph.number_of_edges()} archi")
+        
+        logger.info("=== ANALISI COMPLETATA CON SUCCESSO ===")
+
+
+# Utilità per test e benchmark
+class PerformanceBenchmark:
+    """Classe per benchmark delle prestazioni"""
+    
+    @staticmethod
+    def run_benchmark(test_files):
+        """Esegue benchmark su una lista di file di test"""
+        results = []
+        
+        for file_path in test_files:
+            logger.info(f"Benchmark per {file_path}")
+            
+            orchestrator = AnalysisOrchestrator()
+            start_time = time.time()
+            
+            success = orchestrator.run(
+                input_file=file_path,
+                output_dir=f"benchmark_output_{int(time.time())}",
+                output_graph="benchmark_graph.png"
+            )
+            
+            elapsed = time.time() - start_time
+            file_size = orchestrator.file_size_mb
+            
+            result = {
+                'file': file_path,
+                'size_mb': file_size,
+                'time_s': elapsed,
+                'speed_mbps': file_size / elapsed if elapsed > 0 else 0,
+                'success': success,
+                'nodes': len(orchestrator.analyzer.hosts) if success else 0,
+                'edges': len(orchestrator.analyzer.connections) if success else 0
+            }
+            
+            results.append(result)
+            logger.info(f"Risultato: {result}")
+        
+        return results
