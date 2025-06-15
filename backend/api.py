@@ -617,11 +617,15 @@ def analyze():
             
             # Carica il grafo di rete se esiste
             if os.path.exists(temp_graph_path):
+                logger.info(f"Trovato file grafo da caricare: {temp_graph_path}")
                 with open(temp_graph_path, 'rb') as f:
                     graph_content = f.read()
+                logger.info(f"Dimensione file: {len(graph_content)} byte")
                 GCSFileManager.upload_file_from_memory(graph_content, graph_blob_name, 'application/pdf')
                 uploaded_results.append(graph_blob_name)
                 logger.info(f"Uploaded network graph to {graph_blob_name}")
+            else:
+                logger.warning(f"File grafo non trovato: {temp_graph_path}")
             
             # Carica l'analisi JSON se esiste
             if os.path.exists(temp_analysis_path):
