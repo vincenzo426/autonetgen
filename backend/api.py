@@ -480,12 +480,12 @@ def analyze():
         
         # Definisci i percorsi per i risultati su GCS
         results_prefix = f"results/{session_id}"
-        graph_blob_name = f"{results_prefix}/network_graph.pdf"
+        graph_blob_name = f"{results_prefix}/network_graph_optimized.pdf"
         analysis_blob_name = f"{results_prefix}/network_analysis.json"
         terraform_prefix = f"{results_prefix}/terraform"
         
         # Definisci i percorsi temporanei locali
-        temp_graph_path = os.path.join(temp_output_dir, 'network_graph.pdf')
+        temp_graph_path = os.path.join(temp_output_dir, 'network_graph_optimized.pdf')
         temp_analysis_path = os.path.join(temp_output_dir, 'network_analysis.json')
         temp_terraform_dir = os.path.join(temp_output_dir, 'terraform')
         
@@ -725,7 +725,7 @@ def download_file(file_type):
         # Se non è fornito il blob_name, costruiscilo dal session_id e file_type
         if not blob_name:
             if file_type == 'graph':
-                blob_name = f"results/{session_id}/network_graph.pdf"
+                blob_name = f"results/{session_id}/network_graph_optimized.pdf"
             elif file_type == 'analysis':
                 blob_name = f"results/{session_id}/network_analysis.json"
             elif file_type == 'terraform':
@@ -745,7 +745,7 @@ def download_file(file_type):
             # Determina il nome del file per il download
             filename = os.path.basename(blob_name)
             if file_type == 'graph':
-                filename = 'network_graph.pdf'
+                filename = 'network_graph_optimized.pdf'
             elif file_type == 'analysis':
                 filename = 'network_analysis.json'
             
