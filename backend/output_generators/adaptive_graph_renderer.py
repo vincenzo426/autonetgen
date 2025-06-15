@@ -538,7 +538,7 @@ class OptimizedGraphvizRenderer(BaseGraphRenderer):
         basename = os.path.splitext(output_path)[0]
         
         try:
-            result_path = dot.render(basename + "_optimized", cleanup=True)
+            result_path = dot.render(basename, cleanup=True)
             logger.info(f"Grafo ottimizzato salvato: {result_path}")
             return result_path
         except Exception as e:
