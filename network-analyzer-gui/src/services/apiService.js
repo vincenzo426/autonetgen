@@ -870,9 +870,9 @@ const apiService = {
         auto_approve: autoApprove,
       };
 
-      if (tempDir) {
+      /*if (tempDir) {
         requestData.temp_dir = tempDir;
-      }
+      }*/
 
       const response = await fetch(`${API_URL}/terraform/destroy`, {
         method: "POST",
