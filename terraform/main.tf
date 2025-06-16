@@ -1,3 +1,4 @@
+
 # main.tf - Configurazione principale per autonetgen su Google Cloud Platform
 
 # Abilita le API necessarie
@@ -8,7 +9,10 @@ resource "google_project_service" "required_apis" {
     "storage-api.googleapis.com",
     "storage-component.googleapis.com",
     "logging.googleapis.com",
-    "monitoring.googleapis.com"
+    "monitoring.googleapis.com",
+    "iam.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "serviceusage.googleapis.com"
     # Rimossa secretmanager.googleapis.com perché non la usiamo più
   ])
   
@@ -16,6 +20,37 @@ resource "google_project_service" "required_apis" {
   
   disable_dependent_services = false
 }
+
+# === PERMESSI AGGIUNTIVI PER TERRAFORM DEPLOYMENT SUL BACKEND ===
+
+# Permessi aggiuntivi per il service account backend per deployment Terraform
+resource "google_project_iam_member" "backend_terraform_permissions" {
+  for_each = toset([
+    "roles/run.admin",                    # Gestione completa Cloud Run
+    "roles/iam.serviceAccountAdmin",      # Creazione e gestione service account
+    "roles/iam.serviceAccountKeyAdmin",   # Gestione chiavi service account
+    "roles/resourcemanager.projectIamAdmin", # Gestione IAM a livello progetto
+    "roles/serviceusage.serviceUsageAdmin",  # Abilitazione/disabilitazione API
+    "roles/cloudbuild.builds.editor",     # Se si usa Cloud Build per CI/CD
+    "roles/logging.admin",                # Gestione logging
+    "roles/monitoring.admin"              # Gestione monitoring
+  ])
+  
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.autonetgen_sa.email}"
+  
+  depends_on = [google_service_account.autonetgen_sa]
+}
+
+# Permesso per il service account backend di gestire altri service account
+resource "google_service_account_iam_member" "backend_sa_iam_admin" {
+  service_account_id = google_service_account.autonetgen_sa.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.autonetgen_sa.email}"
+}
+
+# === FINE CONFIGURAZIONE TERRAFORM DEPLOYMENT ===
 
 # Cloud Storage bucket per file uploads e risultati
 resource "google_storage_bucket" "autonetgen_storage" {
