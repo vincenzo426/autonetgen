@@ -279,7 +279,7 @@ output "original_to_gcp_mapping" {
 """)
             
             for host in host_roles:
-                host_safe = host.replace('.', '-')
+                host_safe = self.sanitize_tag_name(host)
                 f.write(f'    "{host}" = "${{google_compute_instance.{host_safe}.network_interface[0].network_ip}}"\n')
             
             f.write("""
