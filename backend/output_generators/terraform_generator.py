@@ -9,7 +9,7 @@ from output_generators.base_generator import OutputGenerator
 
 class TerraformGenerator(OutputGenerator):
     """Generatore di configurazioni Terraform per GCP"""
-    def sanitize_tag_name(ip):
+    def sanitize_tag_name(self, ip):
       tag = ip.replace('.', '-')
       if not tag[0].isalpha():
         tag = f"host-{tag}"  # prefix per rendere il tag valido
