@@ -12,7 +12,8 @@ resource "google_project_service" "required_apis" {
     "monitoring.googleapis.com",
     "iam.googleapis.com",
     "cloudresourcemanager.googleapis.com",
-    "serviceusage.googleapis.com"
+    "serviceusage.googleapis.com",
+    "compute.googleapis.com"  # API Compute Engine per VPC, VM, firewall
     # Rimossa secretmanager.googleapis.com perché non la usiamo più
   ])
   
@@ -33,7 +34,8 @@ resource "google_project_iam_member" "backend_terraform_permissions" {
     "roles/serviceusage.serviceUsageAdmin",  # Abilitazione/disabilitazione API
     "roles/cloudbuild.builds.editor",     # Se si usa Cloud Build per CI/CD
     "roles/logging.admin",                # Gestione logging
-    "roles/monitoring.admin"              # Gestione monitoring
+    "roles/monitoring.admin",             # Gestione monitoring
+    "roles/compute.admin"                 # Gestione completa Compute Engine (VPC, VM, firewall)
   ])
   
   project = var.project_id
