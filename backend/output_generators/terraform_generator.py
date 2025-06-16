@@ -9,7 +9,12 @@ from output_generators.base_generator import OutputGenerator
 
 class TerraformGenerator(OutputGenerator):
     """Generatore di configurazioni Terraform per GCP"""
-    
+    def sanitize_tag_name(ip):
+      tag = ip.replace('.', '-')
+      if not tag[0].isalpha():
+        tag = f"host-{tag}"  # prefix per rendere il tag valido
+      return tag
+
     def generate(self, data, output_dir):
         """
         Genera i file di configurazione Terraform per GCP
@@ -114,7 +119,7 @@ resource "google_compute_subnetwork" "{subnet_name}" {{
             firewall_rules = []
             
             for host, role in host_roles.items():
-                host_safe = host.replace('.', '-')
+                host_safe = self.sanitize_tag_name(host)
                 subnet = subnets.get(host, list(unique_subnets)[0] if unique_subnets else "unknown")
                 subnet_resource = gcp_subnet_map.get(subnet, {"name": "subnet-1", "cidr": "10.1.0.0/24"})
                 
@@ -194,40 +199,41 @@ EOF
                 
                 # Crea regole firewall per le porte in uso
                 if used_ports:
-                    fw_name = f"allow-{host_safe}-ports"
+                    # Raggruppa per protocollo
                     fw_ports = {}
-                    
                     for port, proto in used_ports:
                         proto_lower = proto.lower()
                         if proto_lower not in fw_ports:
                             fw_ports[proto_lower] = []
                         fw_ports[proto_lower].append(str(port))
-                    
-                    fw_rule = f"""
+
+                    for proto, ports in fw_ports.items():
+                        # Spezza in chunk da massimo 100 porte
+                        for i in range(0, len(ports), 100):
+                            chunk_ports = ports[i:i+100]
+                            chunk_index = i // 100 + 1
+                            fw_name = f"allow-{host_safe}-{proto}-chunk-{chunk_index}"
+
+                            fw_rule = f"""
 resource "google_compute_firewall" "{fw_name}" {{
   name    = "{fw_name}"
   network = google_compute_network.main_network.name
-"""
-                    
-                    for proto, ports in fw_ports.items():
-                        fw_rule += f"""
+
   allow {{
     protocol = "{proto}"
-    ports    = [{', '.join([f'"{p}"' for p in ports])}]
+    ports    = [{', '.join([f'"{p}"' for p in chunk_ports])}]
   }}
-"""
-                    
-                    fw_rule += f"""
+
   source_ranges = ["0.0.0.0/0"]
   target_tags   = ["{host_safe}"]
 }}
 """
-                    firewall_rules.append(fw_rule)
+                            firewall_rules.append(fw_rule)
                 
                 # Crea l'istanza VM
                 f.write(f"""
-resource "google_compute_instance" "host-{host_safe}" {{
-  name         = "host-{host_safe}"
+resource "google_compute_instance" "{host_safe}" {{
+  name         = "{host_safe}"
   machine_type = "{machine_type}"
   zone         = "us-central1-a"
   tags         = {str(tags + [host_safe]).replace("'", '"')}
@@ -274,7 +280,7 @@ output "original_to_gcp_mapping" {
             
             for host in host_roles:
                 host_safe = host.replace('.', '-')
-                f.write(f'    "{host}" = "${{google_compute_instance.host-{host_safe}.network_interface[0].network_ip}}"\n')
+                f.write(f'    "{host}" = "${{google_compute_instance.{host_safe}.network_interface[0].network_ip}}"\n')
             
             f.write("""
   }
