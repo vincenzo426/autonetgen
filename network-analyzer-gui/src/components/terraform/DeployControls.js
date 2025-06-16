@@ -580,15 +580,29 @@ const DeployControls = ({
           Infrastructure Outputs
         </h4>
         <div className="space-y-2">
-          {Object.entries(status.outputs).map(([key, value]) => (
-            <div
-              key={key}
-              className="flex justify-between items-center text-sm"
-            >
-              <span className="font-medium text-gray-700">{key}:</span>
-              <span className="text-green-700 font-mono">{value}</span>
-            </div>
-          ))}
+          {Object.entries(status.outputs).map(([key, outputObj]) => {
+            // Estrai il valore dall'oggetto output di Terraform
+            const displayValue =
+              typeof outputObj === "object" && outputObj !== null
+                ? outputObj.value !== undefined
+                  ? outputObj.value
+                  : JSON.stringify(outputObj)
+                : String(outputObj);
+
+            return (
+              <div
+                key={key}
+                className="flex justify-between items-center text-sm"
+              >
+                <span className="font-medium text-gray-700">{key}:</span>
+                <span className="text-green-700 font-mono">
+                  {typeof displayValue === "object"
+                    ? JSON.stringify(displayValue, null, 2)
+                    : String(displayValue)}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
     );
