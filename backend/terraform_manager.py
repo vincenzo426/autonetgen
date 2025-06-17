@@ -136,8 +136,16 @@ class TerraformManager:
         Returns:
             dict: Risultato dell'operazione apply
         """
-        logger.info(f"Esecuzione terraform apply in {self.terraform_dir}")
         
+        logger.info(f"Esecuzione terraform apply in {self.terraform_dir}")
+        # Crea un file per il terraform state
+
+        state_path = os.path.join(self.terraform_dir, "terraform.tfstate")
+        if os.path.exists(state_path):
+            logger.info(f"State file trovato: {state_path}")
+        else:
+            logger.warning(f"State file NON trovato dopo apply.")
+    
         try:
             args = ["apply"]
             
@@ -148,11 +156,12 @@ class TerraformManager:
                 args.append(plan_file)
             
             result = self._run_terraform_command(*args, capture_output=True)
+
             
             return {
                 "success": result["returncode"] == 0,
                 "output": result["stdout"],
-                "error": result["stderr"] if result["returncode"] != 0 else None
+                "error": result["stderr"] if result["returncode"] != 0 else None,
             }
         except Exception as e:
             logger.error(f"Errore durante l'esecuzione di terraform apply: {e}")
