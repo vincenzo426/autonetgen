@@ -37,68 +37,120 @@ class NetworkEnricher:
         # Conta le connessioni in entrata e in uscita per ogni host
         incoming_connections = defaultdict(int)
         outgoing_connections = defaultdict(int)
+        unique_connections = defaultdict(set)  # NUOVO: Per contare host unici
         
         for (src, dst), count in network_data.connections.items():
             outgoing_connections[src] += count
             incoming_connections[dst] += count
+            unique_connections[src].add(dst)  # NUOVO
+            unique_connections[dst].add(src)  # NUOVO
         
         # Identificazione dei ruoli basati sui pattern di traffico e sulle porte
         for host in network_data.hosts:
-            # Inizializza con un ruolo predefinito
             role = "UNKNOWN"
             
-            # Host che accettano molte connessioni in entrata sono probabilmente server
-            if incoming_connections[host] > outgoing_connections[host] * 2:
+            # Contatori per analisi del traffico
+            in_conn = incoming_connections[host]
+            out_conn = outgoing_connections[host]
+            unique_conn = len(unique_connections[host])
+            
+            # NUOVO: Identificazione Firewall
+            # Logica per identificare firewall
+            is_firewall_candidate = False
+            firewall_score = 0
+            
+            # Accesso alle porte dell'host (assumendo che network_data abbia host_ports)
+            host_ports = getattr(network_data, 'host_ports', {}).get(host, [])
+            
+            # Controlla se ha porte tipiche di firewall
+            firewall_ports_found = []
+            if hasattr(network_data, 'host_ports'):
+                for port, direction, proto in host_ports:
+                    if port in [22, 53, 80, 443, 161, 162, 514, 1812, 1813, 4500, 500, 1701, 1723, 8080, 3128, 8443]:
+                        firewall_ports_found.append(port)
+                        firewall_score += 1
+            
+            # Analisi del pattern di connessioni per firewall
+            if in_conn > 0 and out_conn > 0:
+                # Traffico bilanciato
+                traffic_ratio = min(in_conn, out_conn) / max(in_conn, out_conn)
+                if traffic_ratio > 0.3:
+                    firewall_score += 2
+                
+                # Alta diversità di connessioni
+                if unique_conn > 5:
+                    firewall_score += 2
+                
+                # Rapporto connessioni uniche vs traffico totale
+                connection_diversity = unique_conn / (in_conn + out_conn + 1) * 100
+                if connection_diversity > 0.1:
+                    firewall_score += 1
+            
+            # Decisione finale per firewall
+            if firewall_score >= 4 or (firewall_score >= 2 and len(firewall_ports_found) >= 3):
+                role = "FIREWALL"
+            
+            # Logica esistente per altri ruoli
+            elif in_conn > out_conn * 2:
                 role = "SERVER"
                 
-                # Identifica tipi specifici di server basandosi sulle porte
-                for port, direction, proto in network_data.host_ports[host]:
-                    if direction == "dst":
-                        if port == 502:
-                            role = "PLC_MODBUS"
-                            break
-                        elif port == 102:
-                            role = "PLC_S7COMM"
-                            break
-                        elif port == 44818:
-                            role = "PLC_ETHERNET_IP"
-                            break
-                        elif port == 80 or port == 443 or port == 8080 or port == 8443:
-                            role = "WEB_SERVER"
-                        elif port == 53:
-                            role = "DNS_SERVER"
-                        elif port == 25:
-                            role = "MAIL_SERVER"
-                        elif port == 21:
-                            role = "FTP_SERVER"
-                        elif port == 22:
-                            role = "SSH_SERVER"
-                        elif port == 3306:
-                            role = "DATABASE_SERVER"
-                        elif port == 1883:
-                            role = "MQTT_BROKER"
+                # Server specializzati
+                if hasattr(network_data, 'host_ports'):
+                    for port, direction, proto in host_ports:
+                        if direction == "dst":
+                            if port == 502:
+                                role = "PLC_MODBUS"
+                                break
+                            elif port == 102:
+                                role = "PLC_S7COMM"
+                                break
+                            elif port == 44818:
+                                role = "PLC_ETHERNET_IP"
+                                break
+                            elif port == 80 or port == 443 or port == 8080 or port == 8443:
+                                role = "WEB_SERVER"
+                            elif port == 53:
+                                role = "DNS_SERVER"
+                            elif port == 25:
+                                role = "MAIL_SERVER"
+                            elif port == 22:
+                                role = "SSH_SERVER"
+                            elif port == 3306:
+                                role = "DATABASE_SERVER"
+                            elif port == 1883:
+                                role = "MQTT_BROKER"
             
-            # Host che iniziano molte connessioni in uscita sono probabilmente client
-            elif outgoing_connections[host] > incoming_connections[host] * 2:
+            elif out_conn > in_conn * 2:
                 role = "CLIENT"
                 
-                # Verifica se è un client specializzato
-                for port, direction, proto in network_data.host_ports[host]:
-                    if direction == "src" and proto == "TCP":
-                        if port == 80 or port == 443 or port == 8080 or port == 8443:
-                            role = "WEB_CLIENT"
-                            break
+                # Client specializzati
+                if hasattr(network_data, 'host_ports'):
+                    for port, direction, proto in host_ports:
+                        if direction == "src" and proto == "TCP":
+                            if port == 80 or port == 443 or port == 8080 or port == 8443:
+                                role = "WEB_CLIENT"
+                                break
             
-            # Host che hanno sia traffico in entrata che in uscita bilanciato potrebbero essere gateway o proxy
-            elif incoming_connections[host] > 0 and outgoing_connections[host] > 0:
-                gateway_threshold = 10  # soglia arbitraria
-                if incoming_connections[host] > gateway_threshold and outgoing_connections[host] > gateway_threshold:
+            # Gateway (traffico bilanciato ma non firewall)
+            elif in_conn > 0 and out_conn > 0:
+                gateway_threshold = 10
+                if in_conn > gateway_threshold and out_conn > gateway_threshold:
                     role = "GATEWAY"
             
             host_roles[host] = role
         
         self.host_data = host_roles
         logger.info(f"Ruoli inferiti per {len(host_roles)} host")
+        
+        # Log riassuntivo dei ruoli
+        role_counts = defaultdict(int)
+        for role in host_roles.values():
+            role_counts[role] += 1
+        
+        logger.info("Distribuzione ruoli trovati:")
+        for role, count in sorted(role_counts.items()):
+            logger.info(f"  {role}: {count} host")
+        
         return host_roles
     
     def identify_subnets(self, network_data):

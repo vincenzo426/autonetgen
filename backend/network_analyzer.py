@@ -85,18 +85,21 @@ class NetworkAnalyzer:
         self.protocols = self.network_data.protocols
     
     def infer_host_roles(self):
-        """Inferisce i ruoli degli host basandosi sul traffico di rete analizzato."""
+        """Inferisce i ruoli degli host basandosi sui pattern di traffico e porte utilizzate."""
         logger.info("Inferenza dei ruoli degli host")
-        
+    
         # Conta le connessioni in entrata e in uscita per ogni host
         incoming_connections = defaultdict(int)
         outgoing_connections = defaultdict(int)
+        unique_connections = defaultdict(set)  # Per contare host unici connessi
         
         for (src, dst), count in self.connections.items():
             outgoing_connections[src] += count
             incoming_connections[dst] += count
+            unique_connections[src].add(dst)
+            unique_connections[dst].add(src)
         
-        # Identificazione delle subnet
+        # Identificazione delle subnet (codice esistente)
         try:
             networks = defaultdict(list)
             for ip in self.hosts:
@@ -105,7 +108,6 @@ class NetworkAnalyzer:
                     network = ipaddress.ip_network(f"{ip}/{prefix}", strict=False)
                     networks[prefix].append((ip, network))
             
-            # Identifica le subnet più probabili (assumendo /24 come più comune)
             subnet_map = {}
             for prefix in [24, 16, 8]:
                 for ip, network in networks[prefix]:
@@ -117,15 +119,59 @@ class NetworkAnalyzer:
         
         # Identificazione dei ruoli basati sui pattern di traffico e sulle porte
         for host in self.hosts:
-            # Inizializza con un ruolo predefinito
             role = "UNKNOWN"
+            host_ports = self.host_ports.get(host, [])
             
-            # Host che accettano molte connessioni in entrata sono probabilmente server
-            if incoming_connections[host] > outgoing_connections[host] * 2:
+            # Contatori per analisi del traffico
+            in_conn = incoming_connections[host]
+            out_conn = outgoing_connections[host]
+            unique_conn = len(unique_connections[host])
+            
+            # NUOVO: Identificazione Firewall
+            # Un firewall tipicamente:
+            # 1. Ha traffico bilanciato in entrata e uscita
+            # 2. Si connette a molti host diversi (alta diversità)
+            # 3. Gestisce porte tipiche di sicurezza/filtering
+            # 4. Ha un rapporto alto di host unici vs traffico totale
+            
+            is_firewall_candidate = False
+            firewall_score = 0
+            
+            # Controlla se ha porte tipiche di firewall
+            firewall_ports_found = []
+            for port, direction, proto in host_ports:
+                if port in [22, 53, 80, 443, 161, 162, 514, 1812, 1813, 4500, 500, 1701, 1723, 8080, 3128, 8443]:
+                    firewall_ports_found.append(port)
+                    firewall_score += 1
+            
+            # Analisi del pattern di connessioni
+            if in_conn > 0 and out_conn > 0:
+                # Traffico bilanciato (né troppo server né troppo client)
+                traffic_ratio = min(in_conn, out_conn) / max(in_conn, out_conn)
+                if traffic_ratio > 0.3:  # Traffico relativamente bilanciato
+                    firewall_score += 2
+                
+                # Alta diversità di connessioni (si connette a molti host diversi)
+                if unique_conn > 5:  # Soglia configurabile
+                    firewall_score += 2
+                
+                # Rapporto connessioni uniche vs traffico totale
+                # Un firewall ha molti host diversi ma non necessariamente tanto traffico per host
+                connection_diversity = unique_conn / (in_conn + out_conn + 1) * 100
+                if connection_diversity > 0.1:  # Alta diversità relativa
+                    firewall_score += 1
+            
+            # Decisione finale per firewall
+            if firewall_score >= 4 or (firewall_score >= 2 and len(firewall_ports_found) >= 3):
+                role = "FIREWALL"
+                logger.info(f"Host {host} identificato come FIREWALL (score: {firewall_score}, porte: {firewall_ports_found})")
+            
+            # Se non è un firewall, applica la logica esistente
+            elif in_conn > out_conn * 2:
                 role = "SERVER"
                 
                 # Identifica tipi specifici di server basandosi sulle porte
-                for port, direction, proto in self.host_ports[host]:
+                for port, direction, proto in host_ports:
                     if direction == "dst":
                         if port == 502:
                             role = "PLC_MODBUS"
@@ -151,27 +197,35 @@ class NetworkAnalyzer:
                         elif port == 1883:
                             role = "MQTT_BROKER"
             
-            # Host che iniziano molte connessioni in uscita sono probabilmente client
-            elif outgoing_connections[host] > incoming_connections[host] * 2:
+            elif out_conn > in_conn * 2:
                 role = "CLIENT"
                 
                 # Verifica se è un client specializzato
-                for port, direction, proto in self.host_ports[host]:
+                for port, direction, proto in host_ports:
                     if direction == "src" and proto == "TCP":
                         if port == 80 or port == 443 or port == 8080 or port == 8443:
                             role = "WEB_CLIENT"
                             break
             
-            # Host che hanno sia traffico in entrata che in uscita bilanciato potrebbero essere gateway o proxy
-            elif incoming_connections[host] > 0 and outgoing_connections[host] > 0:
-                gateway_threshold = 10  # soglia arbitraria
-                if incoming_connections[host] > gateway_threshold and outgoing_connections[host] > gateway_threshold:
+            # Host che hanno traffico bilanciato ma non sono firewall -> gateway
+            elif in_conn > 0 and out_conn > 0:
+                gateway_threshold = 10
+                if in_conn > gateway_threshold and out_conn > gateway_threshold:
                     role = "GATEWAY"
             
             self.host_roles[host] = role
         
         logger.info(f"Ruoli inferiti per {len(self.host_roles)} host")
-    
+        
+        # Log riassuntivo dei ruoli trovati
+        role_counts = defaultdict(int)
+        for role in self.host_roles.values():
+            role_counts[role] += 1
+        
+        logger.info("Distribuzione ruoli:")
+        for role, count in sorted(role_counts.items()):
+            logger.info(f"  {role}: {count} host")
+        
     def build_network_graph(self):
         """Costruisce un grafo direzionato della rete."""
         logger.info("Costruzione del grafo di rete")

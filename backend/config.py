@@ -54,6 +54,7 @@ ROLE_COLORS = {
     "DATABASE_SERVER": "purple",
     "WEB_CLIENT": "skyblue",
     "GATEWAY": "gold",
+    "FIREWALL": "crimson",  # NUOVO: Colore per firewall
     "DNS_SERVER": "hotpink",
     "MAIL_SERVER": "saddlebrown",
     "SSH_SERVER": "dimgray",
@@ -72,11 +73,33 @@ ROLE_SHAPES = {
     "DATABASE_SERVER": "cylinder",
     "WEB_CLIENT": "ellipse",
     "GATEWAY": "pentagon",
+    "FIREWALL": "octagon",  # NUOVO: Forma ottagonale per firewall
     "DNS_SERVER": "rectangle",
     "MAIL_SERVER": "rectangle",
     "SSH_SERVER": "rectangle",
     "MQTT_BROKER": "hexagon",
     "UNKNOWN": "ellipse"
+}
+
+# NUOVO: Porte comuni per firewall e servizi di sicurezza
+FIREWALL_PORTS = {
+    22: 'SSH',           # Gestione remota firewall
+    23: 'TELNET',        # Gestione remota legacy
+    53: 'DNS',           # DNS filtering
+    80: 'HTTP',          # Web filtering
+    443: 'HTTPS',        # SSL inspection
+    161: 'SNMP',         # Monitoring
+    162: 'SNMP-TRAP',    # SNMP traps
+    514: 'SYSLOG',       # Log management
+    1812: 'RADIUS',      # Authentication
+    1813: 'RADIUS-ACC',  # RADIUS accounting
+    4500: 'IPSEC',       # IPSec VPN
+    500: 'ISAKMP',       # IKE VPN
+    1701: 'L2TP',        # L2TP VPN
+    1723: 'PPTP',        # PPTP VPN
+    8080: 'HTTP-PROXY',  # Proxy services
+    3128: 'SQUID-PROXY', # Squid proxy
+    8443: 'HTTPS-ALT'    # Alternative HTTPS
 }
 
 # Configurazioni Terraform
