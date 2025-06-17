@@ -254,7 +254,7 @@ class TerraformManager:
                 "error": str(e)
             }
     
-    def destroy(self, auto_approve=False):
+    def destroy(self, auto_approve=True):
         """
         Esegue terraform destroy
         
