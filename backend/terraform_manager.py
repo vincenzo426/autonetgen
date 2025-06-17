@@ -157,7 +157,13 @@ class TerraformManager:
             
             result = self._run_terraform_command(*args, capture_output=True)
 
-            
+            if result["returncode"] == 0:
+                logger.info("Terraform apply eseguito con successo.")
+                state_path = os.path.join(self.terraform_dir, "terraform.tfstate")
+                if os.path.exists(state_path):
+                    logger.info(f"State file trovato: {state_path}")
+                else:
+                    logger.warning(f"State file NON trovato dopo apply.")
             return {
                 "success": result["returncode"] == 0,
                 "output": result["stdout"],
