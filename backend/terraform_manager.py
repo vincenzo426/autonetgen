@@ -279,8 +279,7 @@ class TerraformManager:
             
             args = ["destroy"]
             
-            if auto_approve:
-                args.append("-auto-approve")
+            args.append("-auto-approve")
                 
             result = self._run_terraform_command(*args, capture_output=True)
             
