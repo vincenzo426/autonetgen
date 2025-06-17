@@ -136,7 +136,7 @@ class CSVParser(NetworkParser):
             # Source IP
             if any(pattern in col_lower for pattern in [
                 'source ip', 'src ip', 'source_ip', 'src_ip', 'source.ip', 'src.ip',
-                'source address', 'src address', 'source_address', 'src_address'
+                'source address', 'src address', 'source_address', 'src_address', 'Source'
             ]):
                 columns['src_ip'] = i
             
@@ -144,7 +144,7 @@ class CSVParser(NetworkParser):
             elif any(pattern in col_lower for pattern in [
                 'destination ip', 'dst ip', 'dest ip', 'destination_ip', 'dst_ip', 'dest_ip',
                 'destination.ip', 'dst.ip', 'dest.ip', 'destination address', 'dst address',
-                'dest address', 'destination_address', 'dst_address', 'dest_address'
+                'dest address', 'destination_address', 'dst_address', 'dest_address' ,'Destination'
             ]):
                 columns['dst_ip'] = i
             
@@ -163,7 +163,7 @@ class CSVParser(NetworkParser):
             
             # Protocol
             elif any(pattern in col_lower for pattern in [
-                'protocol', 'proto', 'prot'
+                'protocol', 'proto', 'prot', 'Protocol'
             ]):
                 columns['protocol'] = i
         
