@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TerraformManager - classe per gestire le operazioni Terraform
+TerraformManager - classe per gestire le operazioni Terraform con sincronizzazione GCS
 """
 
 import os
@@ -10,16 +10,69 @@ import tempfile
 from config import logger
 
 class TerraformManager:
-    """Classe per gestire le operazioni di Terraform"""
+    """Classe per gestire le operazioni di Terraform con sincronizzazione GCS del tfstate"""
 
-    def __init__(self, terraform_dir):
+    def __init__(self, terraform_dir, session_id=None, gcs_manager=None):
         """
         Inizializza il manager Terraform
         
         Args:
             terraform_dir (str): Directory contenente i file Terraform
+            session_id (str): ID della sessione per GCS
+            gcs_manager: Istanza del GCSFileManager per la sincronizzazione
         """
         self.terraform_dir = terraform_dir
+        self.session_id = session_id
+        self.gcs_manager = gcs_manager
+        self.tfstate_path = os.path.join(terraform_dir, "terraform.tfstate")
+        
+    def sync_state_from_gcs(self):
+        """
+        Sincronizza il file tfstate da GCS alla directory locale
+        
+        Returns:
+            bool: True se la sincronizzazione è riuscita o non necessaria
+        """
+        if not self.session_id or not self.gcs_manager:
+            logger.info("Sincronizzazione GCS non configurata")
+            return True
+            
+        try:
+            return self.gcs_manager.download_tfstate(self.session_id, self.tfstate_path)
+        except Exception as e:
+            logger.error(f"Errore nella sincronizzazione del tfstate da GCS: {e}")
+            return False
+    
+    def sync_state_to_gcs(self, backup_suffix=None):
+        """
+        Sincronizza il file tfstate locale su GCS
+        
+        Args:
+            backup_suffix (str): Suffisso per il backup opzionale
+            
+        Returns:
+            bool: True se la sincronizzazione è riuscita
+        """
+        if not self.session_id or not self.gcs_manager:
+            logger.info("Sincronizzazione GCS non configurata")
+            return True
+            
+        try:
+            # Crea un backup se richiesto
+            if backup_suffix and os.path.exists(self.tfstate_path):
+                self.gcs_manager.backup_tfstate(self.session_id, self.tfstate_path, backup_suffix)
+            
+            # Carica il tfstate aggiornato
+            if os.path.exists(self.tfstate_path):
+                self.gcs_manager.upload_tfstate(self.session_id, self.tfstate_path)
+                return True
+            else:
+                logger.warning("File tfstate locale non trovato per la sincronizzazione")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Errore nella sincronizzazione del tfstate su GCS: {e}")
+            return False
         
     def init(self):
         """
@@ -31,7 +84,15 @@ class TerraformManager:
         logger.info(f"Inizializzazione Terraform in {self.terraform_dir}")
         
         try:
+            # Prima sincronizza il tfstate da GCS se esiste
+            self.sync_state_from_gcs()
+            
             result = self._run_terraform_command("init", capture_output=True)
+            
+            # Dopo l'init, sincronizza eventuali cambiamenti del state
+            if result["returncode"] == 0:
+                self.sync_state_to_gcs()
+            
             return {
                 "success": result["returncode"] == 0,
                 "output": result["stdout"],
@@ -54,6 +115,9 @@ class TerraformManager:
         logger.info(f"Validazione configurazione Terraform in {self.terraform_dir}")
         
         try:
+            # Sincronizza il tfstate da GCS prima della validazione
+            self.sync_state_from_gcs()
+            
             result = self._run_terraform_command("validate", capture_output=True)
             return {
                 "success": result["returncode"] == 0,
@@ -77,6 +141,9 @@ class TerraformManager:
         logger.info(f"Esecuzione terraform plan in {self.terraform_dir}")
         
         try:
+            # Sincronizza il tfstate da GCS prima del plan
+            self.sync_state_from_gcs()
+            
             # Crea un file temporaneo per il piano
             plan_file = os.path.join(self.terraform_dir, "tfplan")
             
@@ -109,6 +176,10 @@ class TerraformManager:
             success = result["returncode"] in [0, 2]
             has_changes = result["returncode"] == 2
             
+            # Sincronizza il tfstate dopo il plan (se ci sono stati cambiamenti)
+            if success:
+                self.sync_state_to_gcs("post-plan")
+            
             return {
                 "success": success,
                 "has_changes": has_changes,
@@ -138,15 +209,15 @@ class TerraformManager:
         """
         
         logger.info(f"Esecuzione terraform apply in {self.terraform_dir}")
-        # Crea un file per il terraform state
-
-        state_path = os.path.join(self.terraform_dir, "terraform.tfstate")
-        if os.path.exists(state_path):
-            logger.info(f"State file trovato: {state_path}")
-        else:
-            logger.warning(f"State file NON trovato dopo apply.")
-    
+        
         try:
+            # Sincronizza il tfstate da GCS prima dell'apply
+            self.sync_state_from_gcs()
+            
+            # Crea un backup del tfstate corrente prima dell'apply
+            if os.path.exists(self.tfstate_path):
+                self.sync_state_to_gcs("pre-apply")
+            
             args = ["apply"]
             
             if auto_approve:
@@ -157,17 +228,24 @@ class TerraformManager:
             
             result = self._run_terraform_command(*args, capture_output=True)
 
-            if result["returncode"] == 0:
+            success = result["returncode"] == 0
+            
+            if success:
                 logger.info("Terraform apply eseguito con successo.")
-                state_path = os.path.join(self.terraform_dir, "terraform.tfstate")
-                if os.path.exists(state_path):
-                    logger.info(f"State file trovato: {state_path}")
+                # Sincronizza il tfstate aggiornato su GCS
+                self.sync_state_to_gcs("post-apply")
+                
+                if os.path.exists(self.tfstate_path):
+                    logger.info(f"State file trovato e sincronizzato: {self.tfstate_path}")
                 else:
                     logger.warning(f"State file NON trovato dopo apply.")
+            else:
+                logger.error("Terraform apply fallito.")
+                
             return {
-                "success": result["returncode"] == 0,
+                "success": success,
                 "output": result["stdout"],
-                "error": result["stderr"] if result["returncode"] != 0 else None,
+                "error": result["stderr"] if not success else None,
             }
         except Exception as e:
             logger.error(f"Errore durante l'esecuzione di terraform apply: {e}")
@@ -189,6 +267,16 @@ class TerraformManager:
         logger.info(f"Esecuzione terraform destroy in {self.terraform_dir}")
         
         try:
+            # Sincronizza il tfstate da GCS prima del destroy (CRUCIALE!)
+            state_synced = self.sync_state_from_gcs()
+            
+            if not state_synced and not os.path.exists(self.tfstate_path):
+                logger.warning("Nessun file tfstate trovato. Il destroy potrebbe non funzionare correttamente.")
+            
+            # Crea un backup del tfstate prima del destroy
+            if os.path.exists(self.tfstate_path):
+                self.sync_state_to_gcs("pre-destroy")
+            
             args = ["destroy"]
             
             if auto_approve:
@@ -196,10 +284,17 @@ class TerraformManager:
                 
             result = self._run_terraform_command(*args, capture_output=True)
             
+            success = result["returncode"] == 0
+            
+            if success:
+                logger.info("Terraform destroy eseguito con successo.")
+                # Sincronizza il tfstate aggiornato (probabilmente vuoto) su GCS
+                self.sync_state_to_gcs("post-destroy")
+            
             return {
-                "success": result["returncode"] == 0,
+                "success": success,
                 "output": result["stdout"],
-                "error": result["stderr"] if result["returncode"] != 0 else None
+                "error": result["stderr"] if not success else None
             }
         except Exception as e:
             logger.error(f"Errore durante l'esecuzione di terraform destroy: {e}")
@@ -218,6 +313,9 @@ class TerraformManager:
         logger.info(f"Recupero output Terraform da {self.terraform_dir}")
         
         try:
+            # Sincronizza il tfstate da GCS prima di leggere gli output
+            self.sync_state_from_gcs()
+            
             result = self._run_terraform_command("output", "-json", capture_output=True)
             
             if result["returncode"] == 0:
@@ -242,6 +340,33 @@ class TerraformManager:
                 "success": False,
                 "error": str(e)
             }
+    
+    def get_tfstate_info(self):
+        """
+        Ottiene informazioni sullo stato del tfstate locale e remoto
+        
+        Returns:
+            dict: Informazioni sullo stato
+        """
+        info = {
+            'local_exists': os.path.exists(self.tfstate_path),
+            'local_size': 0,
+            'remote_info': {}
+        }
+        
+        if info['local_exists']:
+            try:
+                info['local_size'] = os.path.getsize(self.tfstate_path)
+            except:
+                pass
+        
+        if self.session_id and self.gcs_manager:
+            try:
+                info['remote_info'] = self.gcs_manager.get_tfstate_info(self.session_id)
+            except:
+                pass
+        
+        return info
     
     def _run_terraform_command(self, *args, capture_output=False):
         """

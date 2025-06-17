@@ -19,6 +19,7 @@ import io
 from analysis_orchestrator import AnalysisOrchestrator
 from config import logger, DEFAULT_OUTPUT_DIR
 from terraform_manager import TerraformManager
+from gcs_manager import GCSFileManager  # Import della nuova classe separata
 
 app = Flask(__name__)
 CORS(app, 
@@ -30,34 +31,8 @@ CORS(app,
 # Configurazione Google Cloud Storage
 GCS_BUCKET_NAME = os.environ.get('STORAGE_BUCKET', 'gruppo-10-autonetgen-storage')
 
-# Inizializza il client GCS usando le credenziali dalla variabile di ambiente
-def get_storage_client():
-    """Inizializza il client Google Cloud Storage"""
-    try:
-        # Prova a leggere le credenziali dalla variabile di ambiente
-        credentials_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-        
-        if credentials_json:
-            # Carica le credenziali dal JSON nella variabile di ambiente
-            credentials_info = json.loads(credentials_json)
-            credentials = service_account.Credentials.from_service_account_info(credentials_info)
-            storage_client = storage.Client(credentials=credentials)
-            logger.info("Client GCS inizializzato con credenziali dalla variabile di ambiente")
-        else:
-            # Usa le credenziali di default dell'ambiente (utile su Cloud Run)
-            storage_client = storage.Client()
-            logger.info("Client GCS inizializzato con credenziali di default")
-            
-        return storage_client
-        
-    except Exception as e:
-        logger.error(f"Errore nell'inizializzazione del client GCS: {e}")
-        # Fallback alle credenziali di default
-        return storage.Client()
-
-# Inizializza il client
-storage_client = get_storage_client()
-bucket = storage_client.bucket(GCS_BUCKET_NAME)
+# Inizializza il GCSFileManager
+gcs_manager = GCSFileManager(GCS_BUCKET_NAME)
 
 # Configura una directory per i file temporanei (ora usata solo per elaborazione temporanea)
 TEMP_DIR = tempfile.mkdtemp()
@@ -71,263 +46,12 @@ def request_entity_too_large(error):
         'message': 'File troppo grande per essere processato'
     }), 413
 
-class GCSFileManager:
-    """Gestisce le operazioni con Google Cloud Storage"""
-    
-    @staticmethod
-    def generate_signed_url(blob_name, method='PUT', expiration=3600):
-        """
-        Genera una signed URL per l'upload di un file
-        
-        Args:
-            blob_name (str): Nome del blob su GCS
-            method (str): Metodo HTTP (PUT per upload)
-            expiration (int): Secondi di validità della URL
-            
-        Returns:
-            str: Signed URL
-        """
-        try:
-            blob = bucket.blob(blob_name)
-            
-            # Genera la signed URL
-            signed_url = blob.generate_signed_url(
-                version="v4",
-                expiration=datetime.utcnow() + timedelta(seconds=expiration),
-                method=method,
-                content_type="application/octet-stream"
-            )
-            
-            logger.info(f"Generated signed URL for {blob_name}")
-            return signed_url
-            
-        except Exception as e:
-            logger.error(f"Failed to generate signed URL for {blob_name}: {e}")
-            raise
-
-    @staticmethod
-    def download_file_to_memory(blob_name):
-        """
-        Scarica un file da GCS in memoria
-        
-        Args:
-            blob_name (str): Nome del blob su GCS
-            
-        Returns:
-            bytes: Contenuto del file
-        """
-        try:
-            blob = bucket.blob(blob_name)
-            
-            if not blob.exists():
-                raise FileNotFoundError(f"File {blob_name} not found in GCS")
-            
-            # Scarica il file in memoria
-            file_content = blob.download_as_bytes()
-            logger.info(f"Downloaded {blob_name} from GCS ({len(file_content)} bytes)")
-            
-            return file_content
-            
-        except Exception as e:
-            logger.error(f"Failed to download {blob_name} from GCS: {e}")
-            raise
-
-    @staticmethod
-    def upload_file_from_memory(file_content, blob_name, content_type='application/octet-stream'):
-        """
-        Carica un file su GCS dalla memoria
-        
-        Args:
-            file_content (bytes): Contenuto del file
-            blob_name (str): Nome del blob su GCS
-            content_type (str): Tipo di contenuto
-            
-        Returns:
-            str: URL pubblico del file
-        """
-        try:
-            blob = bucket.blob(blob_name)
-            blob.upload_from_string(file_content, content_type=content_type)
-            
-            logger.info(f"File caricato su GCS: {blob_name}")
-            return f"gs://{GCS_BUCKET_NAME}/{blob_name}"
-            
-        except Exception as e:
-            logger.error(f"Errore nel caricamento su GCS: {e}")
-            raise
-
-    @staticmethod
-    def upload_directory_to_gcs(local_dir, gcs_prefix):
-        """
-        Carica una directory locale su GCS
-        
-        Args:
-            local_dir (str): Percorso della directory locale
-            gcs_prefix (str): Prefisso per i file su GCS
-            
-        Returns:
-            list: Lista dei file caricati su GCS
-        """
-        uploaded_files = []
-        try:
-            for root, dirs, files in os.walk(local_dir):
-                for file in files:
-                    local_file_path = os.path.join(root, file)
-                    # Calcola il percorso relativo dal local_dir
-                    relative_path = os.path.relpath(local_file_path, local_dir)
-                    # Crea il nome del blob combinando il prefisso con il percorso relativo
-                    blob_name = f"{gcs_prefix}/{relative_path}".replace("\\", "/")
-                    
-                    # Leggi il file e caricalo su GCS
-                    with open(local_file_path, 'rb') as f:
-                        file_content = f.read()
-                    
-                    # Determina il content-type basato sull'estensione
-                    content_type = 'application/octet-stream'
-                    if file.endswith('.json'):
-                        content_type = 'application/json'
-                    elif file.endswith('.pdf'):
-                        content_type = 'application/pdf'
-                    elif file.endswith('.png'):
-                        content_type = 'image/png'
-                    elif file.endswith('.tf'):
-                        content_type = 'text/plain'
-                    elif file.endswith('.zip'):
-                        content_type = 'application/zip'
-                    
-                    GCSFileManager.upload_file_from_memory(file_content, blob_name, content_type)
-                    uploaded_files.append(blob_name)
-                    
-            logger.info(f"Caricati {len(uploaded_files)} file da {local_dir} a GCS con prefisso {gcs_prefix}")
-            return uploaded_files
-            
-        except Exception as e:
-            logger.error(f"Errore durante il caricamento della directory su GCS: {e}")
-            raise
-
-    @staticmethod
-    def create_download_url(blob_name, expiration=3600):
-        """
-        Crea una signed URL per il download di un file da GCS
-        
-        Args:
-            blob_name (str): Nome del blob su GCS
-            expiration (int): Secondi di validità della URL
-            
-        Returns:
-            str: Signed URL per il download
-        """
-        try:
-            blob = bucket.blob(blob_name)
-            
-            if not blob.exists():
-                raise FileNotFoundError(f"File {blob_name} not found in GCS")
-            
-            # Genera la signed URL per il download
-            signed_url = blob.generate_signed_url(
-                version="v4",
-                expiration=datetime.utcnow() + timedelta(seconds=expiration),
-                method="GET"
-            )
-            
-            logger.info(f"Generated download URL for {blob_name}")
-            return signed_url
-            
-        except Exception as e:
-            logger.error(f"Failed to generate download URL for {blob_name}: {e}")
-            raise
-
-    @staticmethod
-    def move_file_to_processed(blob_name):
-        """
-        Sposta un file dalla cartella uploads a processed
-        
-        Args:
-            blob_name (str): Nome del blob da spostare
-            
-        Returns:
-            str: Nuovo nome del blob nella cartella processed
-        """
-        try:
-            source_blob = bucket.blob(blob_name)
-            
-            if not source_blob.exists():
-                raise FileNotFoundError(f"File {blob_name} not found in GCS")
-            
-            # Crea il nuovo nome nella cartella processed
-            processed_blob_name = blob_name.replace('uploads/', 'processed/', 1)
-            
-            # Copia il file
-            bucket.copy_blob(source_blob, bucket, processed_blob_name)
-            
-            # Elimina il file originale
-            source_blob.delete()
-            
-            logger.info(f"Moved {blob_name} to {processed_blob_name}")
-            return processed_blob_name
-            
-        except Exception as e:
-            logger.error(f"Failed to move {blob_name} to processed: {e}")
-            raise
-
-    @staticmethod
-    def cleanup_session_files(session_id):
-        """
-        Pulisce tutti i file di una sessione
-        
-        Args:
-            session_id (str): ID della sessione
-        """
-        try:
-            # Pulisci file uploads
-            prefix = f"uploads/{session_id}/"
-            blobs = bucket.list_blobs(prefix=prefix)
-            
-            for blob in blobs:
-                try:
-                    blob.delete()
-                    logger.info(f"Deleted {blob.name}")
-                except Exception as e:
-                    logger.warning(f"Failed to delete {blob.name}: {e}")
-            
-            # Pulisci anche i file di risultati
-            results_prefix = f"results/{session_id}/"
-            results_blobs = bucket.list_blobs(prefix=results_prefix)
-            
-            for blob in results_blobs:
-                try:
-                    blob.delete()
-                    logger.info(f"Deleted result file {blob.name}")
-                except Exception as e:
-                    logger.warning(f"Failed to delete result file {blob.name}: {e}")
-                    
-        except Exception as e:
-            logger.error(f"Failed to cleanup session {session_id}: {e}")
-
-    @staticmethod
-    def file_exists(blob_name):
-        """
-        Verifica se un file esiste su GCS
-        
-        Args:
-            blob_name (str): Nome del blob su GCS
-            
-        Returns:
-            bool: True se il file esiste
-        """
-        try:
-            blob = bucket.blob(blob_name)
-            return blob.exists()
-        except Exception as e:
-            logger.error(f"Errore nella verifica esistenza file: {e}")
-            return False
-
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint per Cloud Run"""
     try:
         # Testa la connessione a GCS
-        bucket.reload()
+        gcs_manager.bucket.reload()
         
         return jsonify({
             'status': 'healthy',
@@ -378,7 +102,7 @@ def generate_signed_url():
             
             # Genera la signed URL (valida per 1 ora)
             try:
-                signed_url = GCSFileManager.generate_signed_url(
+                signed_url = gcs_manager.generate_signed_url(
                     blob_name=blob_name,
                     method='PUT',
                     expiration=3600
@@ -427,7 +151,7 @@ def verify_upload():
         verification_results = []
         for blob_name in blob_names:
             try:
-                blob = bucket.blob(blob_name)
+                blob = gcs_manager.bucket.blob(blob_name)
                 exists = blob.exists()
                 size = blob.size if exists else 0
                 
@@ -510,7 +234,7 @@ def analyze():
                 
                 try:
                     # Scarica il file da GCS in memoria
-                    file_content = GCSFileManager.download_file_to_memory(blob_name)
+                    file_content = gcs_manager.download_file_to_memory(blob_name)
                     
                     # Determina l'estensione dal nome del file
                     file_extension = os.path.splitext(blob_name)[1].lower()
@@ -555,7 +279,7 @@ def analyze():
                     
                     # Sposta il file nella cartella processed
                     try:
-                        processed_blob_name = GCSFileManager.move_file_to_processed(blob_name)
+                        processed_blob_name = gcs_manager.move_file_to_processed(blob_name)
                         processed_files.append(processed_blob_name)
                     except Exception as e:
                         logger.warning(f"Failed to move {blob_name} to processed: {e}")
@@ -619,7 +343,7 @@ def analyze():
             if os.path.exists(temp_graph_path):
                 with open(temp_graph_path, 'rb') as f:
                     graph_content = f.read()
-                GCSFileManager.upload_file_from_memory(graph_content, graph_blob_name, 'application/pdf')
+                gcs_manager.upload_file_from_memory(graph_content, graph_blob_name, 'application/pdf')
                 uploaded_results.append(graph_blob_name)
                 logger.info(f"Uploaded network graph to {graph_blob_name}")
             
@@ -627,14 +351,14 @@ def analyze():
             if os.path.exists(temp_analysis_path):
                 with open(temp_analysis_path, 'rb') as f:
                     analysis_content = f.read()
-                GCSFileManager.upload_file_from_memory(analysis_content, analysis_blob_name, 'application/json')
+                gcs_manager.upload_file_from_memory(analysis_content, analysis_blob_name, 'application/json')
                 uploaded_results.append(analysis_blob_name)
                 logger.info(f"Uploaded network analysis to {analysis_blob_name}")
             
             # Carica la directory Terraform se esiste
             terraform_files = []
             if os.path.exists(temp_terraform_dir):
-                terraform_files = GCSFileManager.upload_directory_to_gcs(temp_terraform_dir, terraform_prefix)
+                terraform_files = gcs_manager.upload_directory_to_gcs(temp_terraform_dir, terraform_prefix)
                 uploaded_results.extend(terraform_files)
                 logger.info(f"Uploaded {len(terraform_files)} Terraform files to {terraform_prefix}")
             
@@ -695,7 +419,7 @@ def cleanup_session():
         if not session_id:
             return jsonify({'status': 'error', 'message': 'Session ID required'}), 400
         
-        GCSFileManager.cleanup_session_files(session_id)
+        gcs_manager.cleanup_session_files(session_id)
         
         return jsonify({
             'status': 'success',
@@ -731,12 +455,12 @@ def download_file(file_type):
                 return jsonify({'status': 'error', 'message': 'Invalid file type'}), 400
         
         # Verifica che il file esista
-        if not GCSFileManager.file_exists(blob_name):
+        if not gcs_manager.file_exists(blob_name):
             return jsonify({'status': 'error', 'message': 'File not found'}), 404
         
         # Genera una signed URL per il download
         try:
-            download_url = GCSFileManager.create_download_url(blob_name, expiration=300)  # 5 minuti
+            download_url = gcs_manager.create_download_url(blob_name, expiration=300)  # 5 minuti
             
             # Determina il nome del file per il download
             filename = os.path.basename(blob_name)
@@ -767,7 +491,7 @@ def download_terraform_archive(session_id):
     try:
         # Lista tutti i file Terraform per la sessione
         terraform_prefix = f"results/{session_id}/terraform/"
-        terraform_blobs = bucket.list_blobs(prefix=terraform_prefix)
+        terraform_blobs = gcs_manager.bucket.list_blobs(prefix=terraform_prefix)
         
         # Crea un archivio ZIP in memoria
         from io import BytesIO
@@ -816,7 +540,7 @@ def get_terraform_files():
         
         # Lista i file Terraform su GCS
         terraform_prefix = f"results/{session_id}/terraform/"
-        terraform_blobs = bucket.list_blobs(prefix=terraform_prefix)
+        terraform_blobs = gcs_manager.bucket.list_blobs(prefix=terraform_prefix)
         
         files = []
         for blob in terraform_blobs:
@@ -858,12 +582,12 @@ def get_terraform_file_content():
             return jsonify({'status': 'error', 'message': 'Blob name required'}), 400
         
         # Verifica che il file esista
-        if not GCSFileManager.file_exists(blob_name):
+        if not gcs_manager.file_exists(blob_name):
             return jsonify({'status': 'error', 'message': 'File not found'}), 404
         
         # Scarica il contenuto del file
         try:
-            file_content = GCSFileManager.download_file_to_memory(blob_name)
+            file_content = gcs_manager.download_file_to_memory(blob_name)
             content_str = file_content.decode('utf-8')
             
             return jsonify({
@@ -893,13 +617,13 @@ def save_terraform_file():
             return jsonify({'status': 'error', 'message': 'Blob name and content required'}), 400
         
         # Verifica che il file esista
-        if not GCSFileManager.file_exists(blob_name):
+        if not gcs_manager.file_exists(blob_name):
             return jsonify({'status': 'error', 'message': 'File not found'}), 404
         
         # Salva il contenuto su GCS
         try:
             content_bytes = content.encode('utf-8')
-            GCSFileManager.upload_file_from_memory(content_bytes, blob_name, 'text/plain')
+            gcs_manager.upload_file_from_memory(content_bytes, blob_name, 'text/plain')
             
             return jsonify({
                 'status': 'success',
@@ -940,7 +664,8 @@ def determine_terraform_file_type_from_name(file_name):
     else:
         return 'configuration'
 
-# Mantieni tutti gli endpoint Terraform esistenti adattati per lavorare con GCS
+# ========== ENDPOINT TERRAFORM AGGIORNATI ==========
+
 @app.route('/api/terraform/init', methods=['POST'])
 def terraform_init():
     """
@@ -960,13 +685,13 @@ def terraform_init():
         temp_terraform_dir = tempfile.mkdtemp()
         
         try:
-            # Scarica tutti i file Terraform da GCS
+            # Scarica tutti i file Terraform da GCS (esclusi tfstate e directory)
             terraform_prefix = f"results/{session_id}/terraform/"
-            terraform_blobs = bucket.list_blobs(prefix=terraform_prefix)
+            terraform_blobs = gcs_manager.bucket.list_blobs(prefix=terraform_prefix)
             
             downloaded_files = 0
             for blob in terraform_blobs:
-                if blob.name.endswith('/'):  # Skip directories
+                if blob.name.endswith('/') or blob.name.endswith('.tfstate'):  # Skip directories e tfstate
                     continue
                 
                 # Scarica il file
@@ -991,8 +716,8 @@ def terraform_init():
                     'message': 'No Terraform files found for this session'
                 }), 404
             
-            # Inizializza il manager Terraform
-            manager = TerraformManager(temp_terraform_dir)
+            # Inizializza il manager Terraform con supporto GCS
+            manager = TerraformManager(temp_terraform_dir, session_id, gcs_manager)
             result = manager.init()
             
             if result['success']:
@@ -1001,7 +726,8 @@ def terraform_init():
                     'message': 'Terraform initialized successfully',
                     'output': result['output'],
                     'temp_dir': temp_terraform_dir,
-                    'files_downloaded': downloaded_files
+                    'files_downloaded': downloaded_files,
+                    'tfstate_synced': True
                 })
             else:
                 return jsonify({
@@ -1033,7 +759,7 @@ def terraform_validate():
     try:
         data = request.json
         session_id = data.get('session_id')
-        temp_dir = data.get('temp_dir')  # Directory temporanea dalla init
+        temp_dir = data.get('temp_dir')
         
         if not session_id:
             return jsonify({
@@ -1045,7 +771,6 @@ def terraform_validate():
         
         # Se non abbiamo una directory temporanea, scarica i file da GCS
         if not terraform_dir or not os.path.exists(terraform_dir):
-            # Usa la stessa logica della init per scaricare i file
             init_result = terraform_init()
             init_data = init_result.get_json()
             
@@ -1054,8 +779,8 @@ def terraform_validate():
             
             terraform_dir = init_data.get('temp_dir')
         
-        # Inizializza il manager Terraform
-        manager = TerraformManager(terraform_dir)
+        # Inizializza il manager Terraform con supporto GCS
+        manager = TerraformManager(terraform_dir, session_id, gcs_manager)
         result = manager.validate()
         
         if result['success']:
@@ -1106,8 +831,8 @@ def terraform_plan():
             
             terraform_dir = init_data.get('temp_dir')
         
-        # Inizializza il manager Terraform
-        manager = TerraformManager(terraform_dir)
+        # Inizializza il manager Terraform con supporto GCS
+        manager = TerraformManager(terraform_dir, session_id, gcs_manager)
         
         # Prima inizializza se necessario
         if not os.path.exists(os.path.join(terraform_dir, '.terraform')):
@@ -1129,7 +854,8 @@ def terraform_plan():
                 'has_changes': plan_result['has_changes'],
                 'plan_summary': plan_result['plan_summary'],
                 'plan_file': plan_result['plan_file'],
-                'output': plan_result['output']
+                'output': plan_result['output'],
+                'tfstate_synced': True
             })
         else:
             return jsonify({
@@ -1182,10 +908,10 @@ def terraform_apply():
                 'message': 'Terraform plan file not found'
             }), 400
         
-        # Inizializza il manager Terraform
-        manager = TerraformManager(terraform_dir)
+        # Inizializza il manager Terraform con supporto GCS
+        manager = TerraformManager(terraform_dir, session_id, gcs_manager)
         
-        # Esegui apply
+        # Esegui apply (il manager sincronizzerà automaticamente il tfstate)
         apply_result = manager.apply(plan_file, auto_approve)
         
         if apply_result['success']:
@@ -1196,7 +922,8 @@ def terraform_apply():
                 'status': 'success',
                 'message': 'Terraform infrastructure deployed successfully',
                 'output': apply_result['output'],
-                'terraform_outputs': outputs.get('outputs', {}) if outputs['success'] else {}
+                'terraform_outputs': outputs.get('outputs', {}) if outputs['success'] else {},
+                'tfstate_synced': True
             })
         else:
             return jsonify({
@@ -1241,17 +968,25 @@ def terraform_destroy():
             
             terraform_dir = init_data.get('temp_dir')
         
-        # Inizializza il manager Terraform
-        manager = TerraformManager(terraform_dir)
+        # Inizializza il manager Terraform con supporto GCS
+        manager = TerraformManager(terraform_dir, session_id, gcs_manager)
         
-        # Esegui destroy
+        # Prima sincronizza il tfstate da GCS (CRUCIALE per il destroy!)
+        logger.info(f"Sincronizzazione tfstate da GCS prima del destroy per sessione {session_id}")
+        state_synced = manager.sync_state_from_gcs()
+        
+        if not state_synced:
+            logger.warning(f"Impossibile sincronizzare il tfstate da GCS per la sessione {session_id}")
+        
+        # Esegui destroy (il manager gestirà automaticamente la sincronizzazione)
         destroy_result = manager.destroy(auto_approve)
         
         if destroy_result['success']:
             return jsonify({
                 'status': 'success',
                 'message': 'Terraform infrastructure destroyed successfully',
-                'output': destroy_result['output']
+                'output': destroy_result['output'],
+                'tfstate_synced': True
             })
         else:
             return jsonify({
@@ -1286,25 +1021,31 @@ def terraform_status():
         
         # Verifica se ci sono file Terraform su GCS per questa sessione
         terraform_prefix = f"results/{session_id}/terraform/"
-        terraform_blobs = list(bucket.list_blobs(prefix=terraform_prefix, max_results=1))
+        terraform_blobs = list(gcs_manager.bucket.list_blobs(prefix=terraform_prefix, max_results=1))
         has_terraform_files = len(terraform_blobs) > 0
+        
+        # Verifica se esiste un tfstate su GCS
+        tfstate_blob_name = f"results/{session_id}/terraform/terraform.tfstate"
+        has_tfstate_on_gcs = gcs_manager.file_exists(tfstate_blob_name)
         
         if not has_terraform_files:
             return jsonify({
                 'status': 'success',
                 'has_terraform_files': False,
+                'has_tfstate_on_gcs': False,
                 'is_initialized': False,
                 'is_deployed': False,
                 'outputs': {}
             })
         
-        # Se non abbiamo una directory temporanea locale, lo stato è basato solo sui file GCS
+        # Se non abbiamo una directory temporanea locale, lo stato è basato su GCS
         if not terraform_dir or not os.path.exists(terraform_dir):
             return jsonify({
                 'status': 'success',
                 'has_terraform_files': True,
+                'has_tfstate_on_gcs': has_tfstate_on_gcs,
                 'is_initialized': False,
-                'is_deployed': False,
+                'is_deployed': has_tfstate_on_gcs,  # Se c'è tfstate su GCS, probabilmente è deployed
                 'outputs': {},
                 'message': 'Terraform files available on cloud storage, but not initialized locally'
             })
@@ -1318,7 +1059,7 @@ def terraform_status():
         outputs = {}
         
         if is_initialized:
-            manager = TerraformManager(terraform_dir)
+            manager = TerraformManager(terraform_dir, session_id, gcs_manager)
             outputs_result = manager.get_outputs()
             is_deployed = outputs_result['success']
             outputs = outputs_result.get('outputs', {}) if is_deployed else {}
@@ -1326,6 +1067,7 @@ def terraform_status():
         return jsonify({
             'status': 'success',
             'has_terraform_files': True,
+            'has_tfstate_on_gcs': has_tfstate_on_gcs,
             'is_initialized': is_initialized,
             'is_deployed': is_deployed,
             'outputs': outputs
@@ -1333,6 +1075,100 @@ def terraform_status():
     
     except Exception as e:
         logger.error(f"Error getting Terraform status: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+# ========== ENDPOINT PER GESTIONE TFSTATE ==========
+
+@app.route('/api/terraform/tfstate/info', methods=['GET'])
+def get_tfstate_info():
+    """
+    Endpoint per ottenere informazioni sul tfstate
+    """
+    try:
+        session_id = request.args.get('session_id')
+        
+        if not session_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'Session ID required'
+            }), 400
+        
+        tfstate_info = gcs_manager.get_tfstate_info(session_id)
+        
+        return jsonify({
+            'status': 'success',
+            'tfstate_info': tfstate_info
+        })
+    
+    except Exception as e:
+        logger.error(f"Error getting tfstate info: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/terraform/tfstate/backups', methods=['GET'])
+def list_tfstate_backups():
+    """
+    Endpoint per listare i backup del tfstate
+    """
+    try:
+        session_id = request.args.get('session_id')
+        
+        if not session_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'Session ID required'
+            }), 400
+        
+        backups = gcs_manager.list_tfstate_backups(session_id)
+        
+        return jsonify({
+            'status': 'success',
+            'backups': backups
+        })
+    
+    except Exception as e:
+        logger.error(f"Error listing tfstate backups: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/terraform/tfstate/restore', methods=['POST'])
+def restore_tfstate_from_backup():
+    """
+    Endpoint per ripristinare il tfstate da un backup
+    """
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        backup_blob_name = data.get('backup_blob_name')
+        
+        if not session_id or not backup_blob_name:
+            return jsonify({
+                'status': 'error',
+                'message': 'Session ID and backup blob name required'
+            }), 400
+        
+        success = gcs_manager.restore_tfstate_from_backup(session_id, backup_blob_name)
+        
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': 'Tfstate restored from backup successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to restore tfstate from backup'
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Error restoring tfstate from backup: {e}")
         return jsonify({
             'status': 'error',
             'message': str(e)
