@@ -280,7 +280,8 @@ class TerraformManager:
             args = ["destroy"]
             
             args.append("-auto-approve")
-                
+            logger.info("Auto-approvazione del destroy abilitata.")
+
             result = self._run_terraform_command(*args, capture_output=True)
             
             success = result["returncode"] == 0
