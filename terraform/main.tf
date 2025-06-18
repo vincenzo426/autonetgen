@@ -407,7 +407,7 @@ resource "google_compute_backend_service" "frontend_backend" {
     group = google_compute_region_network_endpoint_group.frontend_neg[0].id
   }
 
-  health_checks = [google_compute_health_check.frontend_health_check[0].id]
+  #health_checks = [google_compute_health_check.frontend_health_check[0].id]
 
   log_config {
     enable = true
@@ -428,7 +428,7 @@ resource "google_compute_backend_service" "backend_backend" {
     group = google_compute_region_network_endpoint_group.backend_neg[0].id
   }
 
-  health_checks = [google_compute_health_check.backend_health_check[0].id]
+  #health_checks = [google_compute_health_check.backend_health_check[0].id]
 
   log_config {
     enable = true
