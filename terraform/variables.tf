@@ -129,7 +129,7 @@ variable "labels" {
   }
 }
 
-# === NUOVE VARIABILI PER CONTROLLO ACCESSO ===
+# === VARIABILI PER CONTROLLO ACCESSO ===
 
 variable "enable_public_access" {
   description = "Abilita l'accesso pubblico al frontend (per utenti autenticati Google)"
@@ -167,4 +167,112 @@ variable "domain_name" {
   description = "Nome dominio personalizzato (opzionale)"
   type        = string
   default     = ""
+}
+
+# === NUOVE VARIABILI PER VPC E LOAD BALANCER ===
+
+variable "enable_load_balancer" {
+  description = "Abilita il Load Balancer HTTPS globale"
+  type        = bool
+  default     = false
+}
+
+variable "load_balancer_domain" {
+  description = "Dominio per il Load Balancer (richiesto per SSL). Es: autonetgen.example.com"
+  type        = string
+  default     = ""
+  
+  validation {
+    condition = var.load_balancer_domain == "" || can(regex("^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", var.load_balancer_domain))
+    error_message = "Il dominio deve essere nel formato valido (es: autonetgen.example.com) o vuoto."
+  }
+}
+
+variable "use_load_balancer" {
+  description = "Se true, il frontend userà il load balancer per le chiamate API"
+  type        = bool
+  default     = false
+}
+
+variable "vpc_cidr_range" {
+  description = "Range CIDR per la VPC principale"
+  type        = string
+  default     = "10.0.0.0/16"
+  
+  validation {
+    condition     = can(cidrhost(var.vpc_cidr_range, 0))
+    error_message = "Il vpc_cidr_range deve essere un range CIDR valido."
+  }
+}
+
+variable "frontend_subnet_cidr" {
+  description = "Range CIDR per la subnet del frontend"
+  type        = string
+  default     = "10.1.0.0/24"
+  
+  validation {
+    condition     = can(cidrhost(var.frontend_subnet_cidr, 0))
+    error_message = "Il frontend_subnet_cidr deve essere un range CIDR valido."
+  }
+}
+
+variable "backend_subnet_cidr" {
+  description = "Range CIDR per la subnet del backend"
+  type        = string
+  default     = "10.2.0.0/24"
+  
+  validation {
+    condition     = can(cidrhost(var.backend_subnet_cidr, 0))
+    error_message = "Il backend_subnet_cidr deve essere un range CIDR valido."
+  }
+}
+
+variable "vpc_connector_cidr" {
+  description = "Range CIDR per il VPC connector (deve essere /28)"
+  type        = string
+  default     = "10.8.0.0/28"
+  
+  validation {
+    condition     = can(regex("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}/28$", var.vpc_connector_cidr))
+    error_message = "Il VPC connector deve usare una subnet /28."
+  }
+}
+
+variable "enable_vpc_flow_logs" {
+  description = "Abilita i flow logs per la VPC (utile per debugging ma comporta costi)"
+  type        = bool
+  default     = false
+}
+
+variable "nat_log_filter" {
+  description = "Filtro per i log del Cloud NAT (ERRORS_ONLY, TRANSLATIONS_ONLY, ALL)"
+  type        = string
+  default     = "ERRORS_ONLY"
+  
+  validation {
+    condition     = contains(["ERRORS_ONLY", "TRANSLATIONS_ONLY", "ALL"], var.nat_log_filter)
+    error_message = "Il filtro deve essere: ERRORS_ONLY, TRANSLATIONS_ONLY, o ALL."
+  }
+}
+
+variable "vpc_connector_min_throughput" {
+  description = "Throughput minimo per il VPC connector (200-1000 Mbps)"
+  type        = number
+  default     = 200
+  
+  validation {
+    condition     = var.vpc_connector_min_throughput >= 200 && var.vpc_connector_min_throughput <= 1000
+    error_message = "Il throughput minimo deve essere tra 200 e 1000 Mbps."
+  }
+}
+
+variable "vpc_connector_max_throughput" {
+  description = "Throughput massimo per il VPC connector (300-1000 Mbps)"
+  type        = number
+  default     = 300
+  
+  validation {
+    condition     = var.vpc_connector_max_throughput >= 300 && var.vpc_connector_max_throughput <= 1000
+    error_message = "Il throughput massimo deve essere tra 300 e 1000 Mbps."
+  }
 }

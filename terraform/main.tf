@@ -1,4 +1,3 @@
-
 # main.tf - Configurazione principale per autonetgen su Google Cloud Platform
 
 # Abilita le API necessarie
@@ -13,13 +12,101 @@ resource "google_project_service" "required_apis" {
     "iam.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "serviceusage.googleapis.com",
-    "compute.googleapis.com"  # API Compute Engine per VPC, VM, firewall
-    # Rimossa secretmanager.googleapis.com perché non la usiamo più
+    "compute.googleapis.com",      # API Compute Engine per VPC, VM, firewall
+    "vpcaccess.googleapis.com",    # API VPC Access per Cloud Run
+    "servicenetworking.googleapis.com"  # API Service Networking
   ])
   
   service = each.value
   
   disable_dependent_services = false
+}
+
+# === CONFIGURAZIONE VPC E RETE ===
+
+# VPC principale
+resource "google_compute_network" "autonetgen_vpc" {
+  name                    = "autonetgen-vpc"
+  auto_create_subnetworks = false
+  description            = "VPC per AutoNetGen"
+
+  depends_on = [google_project_service.required_apis]
+}
+
+# Subnet per il frontend
+resource "google_compute_subnetwork" "frontend_subnet" {
+  name          = "autonetgen-frontend-subnet"
+  ip_cidr_range = "10.1.0.0/24"
+  region        = var.region
+  network       = google_compute_network.autonetgen_vpc.id
+  description   = "Subnet per il frontend AutoNetGen"
+
+  # Configurazione per servizi Google
+  private_ip_google_access = true
+}
+
+# Subnet per il backend
+resource "google_compute_subnetwork" "backend_subnet" {
+  name          = "autonetgen-backend-subnet"
+  ip_cidr_range = "10.2.0.0/24"
+  region        = var.region
+  network       = google_compute_network.autonetgen_vpc.id
+  description   = "Subnet per il backend AutoNetGen"
+
+  # Configurazione per servizi Google
+  private_ip_google_access = true
+}
+
+# Cloud Router per NAT Gateway
+resource "google_compute_router" "autonetgen_router" {
+  name    = "autonetgen-router"
+  region  = var.region
+  network = google_compute_network.autonetgen_vpc.id
+  
+  description = "Router per AutoNetGen VPC"
+}
+
+# Cloud NAT per accesso internet dalle subnet private
+resource "google_compute_router_nat" "autonetgen_nat" {
+  name   = "autonetgen-nat"
+  router = google_compute_router.autonetgen_router.name
+  region = google_compute_router.autonetgen_router.region
+
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+
+  log_config {
+    enable = true
+    filter = "ERRORS_ONLY"
+  }
+}
+
+# VPC Connector per Cloud Run
+resource "google_vpc_access_connector" "autonetgen_connector" {
+  name          = "autonetgen-connector"
+  region        = var.region
+  network       = google_compute_network.autonetgen_vpc.name
+  ip_cidr_range = "10.8.0.0/28"
+  
+  min_throughput = 200
+  max_throughput = 300
+
+  depends_on = [google_project_service.required_apis]
+}
+
+# Firewall rule per permettere health check del load balancer
+resource "google_compute_firewall" "allow_lb_health_check" {
+  name    = "autonetgen-allow-lb-health-check"
+  network = google_compute_network.autonetgen_vpc.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["8080"]
+  }
+
+  # IP ranges per Google Load Balancer health checks
+  source_ranges = ["130.211.0.0/22", "35.191.0.0/16"]
+  target_tags   = ["autonetgen-backend", "autonetgen-frontend"]
 }
 
 # === PERMESSI AGGIUNTIVI PER TERRAFORM DEPLOYMENT SUL BACKEND ===
@@ -196,6 +283,8 @@ resource "google_cloud_run_service" "backend" {
         "autoscaling.knative.dev/maxScale"         = tostring(var.max_instances)
         "run.googleapis.com/execution-environment" = "gen2"
         "run.googleapis.com/startup-cpu-boost"     = "true"
+        "run.googleapis.com/vpc-access-connector"  = google_vpc_access_connector.autonetgen_connector.id
+        "run.googleapis.com/vpc-access-egress"     = "private-ranges-only"
       }
     }
   }
@@ -207,7 +296,8 @@ resource "google_cloud_run_service" "backend" {
   
   depends_on = [
     google_project_service.required_apis,
-    google_service_account_key.autonetgen_sa_key
+    google_service_account_key.autonetgen_sa_key,
+    google_vpc_access_connector.autonetgen_connector
   ]
 }
 
@@ -246,7 +336,7 @@ resource "google_cloud_run_service" "frontend" {
         # Variabili di ambiente per il frontend
         env {
           name  = "REACT_APP_API_URL"
-          value = google_cloud_run_service.backend.status[0].url
+          value = var.use_load_balancer ? "https://${var.load_balancer_domain}/api" : google_cloud_run_service.backend.status[0].url
         }
         
         # Configurazione risorse economica
@@ -268,6 +358,8 @@ resource "google_cloud_run_service" "frontend" {
         "autoscaling.knative.dev/minScale" = "0"
         "autoscaling.knative.dev/maxScale" = "2"
         "run.googleapis.com/execution-environment" = "gen2"
+        "run.googleapis.com/vpc-access-connector"  = google_vpc_access_connector.autonetgen_connector.id
+        "run.googleapis.com/vpc-access-egress"     = "private-ranges-only"
       }
     }
   }
@@ -277,39 +369,216 @@ resource "google_cloud_run_service" "frontend" {
     latest_revision = true
   }
   
-  depends_on = [google_project_service.required_apis]
+  depends_on = [
+    google_project_service.required_apis,
+    google_vpc_access_connector.autonetgen_connector
+  ]
 }
 
-# SOLUZIONE 1: Accesso pubblico per utenti autenticati (RACCOMANDATO)
-# Questo permette l'accesso a chiunque abbia un account Google
-/*
-resource "google_cloud_run_service_iam_member" "frontend_authenticated_users" {
-  count    = var.enable_public_access ? 1 : 0
+# === CONFIGURAZIONE LOAD BALANCER ===
+
+# IP statico globale per il load balancer
+resource "google_compute_global_address" "autonetgen_ip" {
+  count = var.enable_load_balancer ? 1 : 0
+  name  = "autonetgen-lb-ip"
+}
+
+# Certificato SSL gestito per HTTPS
+resource "google_compute_managed_ssl_certificate" "autonetgen_ssl" {
+  count = var.enable_load_balancer && var.load_balancer_domain != "" ? 1 : 0
+  name  = "autonetgen-ssl-cert"
+
+  managed {
+    domains = [var.load_balancer_domain]
+  }
+}
+
+# Backend service per il frontend
+resource "google_compute_backend_service" "frontend_backend" {
+  count       = var.enable_load_balancer ? 1 : 0
+  name        = "autonetgen-frontend-backend"
+  description = "Backend service per il frontend AutoNetGen"
+  
+  protocol    = "HTTP"
+  port_name   = "http"
+  timeout_sec = 30
+
+  backend {
+    group = google_compute_region_network_endpoint_group.frontend_neg[0].id
+  }
+
+  health_checks = [google_compute_health_check.frontend_health_check[0].id]
+
+  log_config {
+    enable = true
+  }
+}
+
+# Backend service per il backend
+resource "google_compute_backend_service" "backend_backend" {
+  count       = var.enable_load_balancer ? 1 : 0
+  name        = "autonetgen-backend-backend"
+  description = "Backend service per il backend AutoNetGen"
+  
+  protocol    = "HTTP"
+  port_name   = "http"
+  timeout_sec = 30
+
+  backend {
+    group = google_compute_region_network_endpoint_group.backend_neg[0].id
+  }
+
+  health_checks = [google_compute_health_check.backend_health_check[0].id]
+
+  log_config {
+    enable = true
+  }
+}
+
+# Network Endpoint Group per il frontend
+resource "google_compute_region_network_endpoint_group" "frontend_neg" {
+  count                 = var.enable_load_balancer ? 1 : 0
+  name                  = "autonetgen-frontend-neg"
+  network_endpoint_type = "SERVERLESS"
+  region                = var.region
+
+  cloud_run {
+    service = google_cloud_run_service.frontend.name
+  }
+}
+
+# Network Endpoint Group per il backend
+resource "google_compute_region_network_endpoint_group" "backend_neg" {
+  count                 = var.enable_load_balancer ? 1 : 0
+  name                  = "autonetgen-backend-neg"
+  network_endpoint_type = "SERVERLESS"
+  region                = var.region
+
+  cloud_run {
+    service = google_cloud_run_service.backend.name
+  }
+}
+
+# Health check per il frontend
+resource "google_compute_health_check" "frontend_health_check" {
+  count = var.enable_load_balancer ? 1 : 0
+  name  = "autonetgen-frontend-health-check"
+
+  http_health_check {
+    port         = 8080
+    request_path = "/"
+  }
+
+  timeout_sec        = 5
+  check_interval_sec = 10
+}
+
+# Health check per il backend
+resource "google_compute_health_check" "backend_health_check" {
+  count = var.enable_load_balancer ? 1 : 0
+  name  = "autonetgen-backend-health-check"
+
+  http_health_check {
+    port         = 8080
+    request_path = "/api/health"
+  }
+
+  timeout_sec        = 5
+  check_interval_sec = 10
+}
+
+# URL map per instradare le richieste
+resource "google_compute_url_map" "autonetgen_url_map" {
+  count           = var.enable_load_balancer ? 1 : 0
+  name            = "autonetgen-url-map"
+  default_service = google_compute_backend_service.frontend_backend[0].id
+
+  host_rule {
+    hosts        = var.load_balancer_domain != "" ? [var.load_balancer_domain] : ["*"]
+    path_matcher = "allpaths"
+  }
+
+  path_matcher {
+    name            = "allpaths"
+    default_service = google_compute_backend_service.frontend_backend[0].id
+
+    path_rule {
+      paths   = ["/api/*"]
+      service = google_compute_backend_service.backend_backend[0].id
+    }
+  }
+}
+
+# Target HTTPS proxy
+resource "google_compute_target_https_proxy" "autonetgen_https_proxy" {
+  count   = var.enable_load_balancer && var.load_balancer_domain != "" ? 1 : 0
+  name    = "autonetgen-https-proxy"
+  url_map = google_compute_url_map.autonetgen_url_map[0].id
+
+  ssl_certificates = [google_compute_managed_ssl_certificate.autonetgen_ssl[0].id]
+}
+
+# Target HTTP proxy per redirect
+resource "google_compute_target_http_proxy" "autonetgen_http_proxy" {
+  count   = var.enable_load_balancer ? 1 : 0
+  name    = "autonetgen-http-proxy"
+  url_map = var.load_balancer_domain != "" ? google_compute_url_map.autonetgen_redirect_url_map[0].id : google_compute_url_map.autonetgen_url_map[0].id
+}
+
+# URL map per redirect HTTP -> HTTPS
+resource "google_compute_url_map" "autonetgen_redirect_url_map" {
+  count = var.enable_load_balancer && var.load_balancer_domain != "" ? 1 : 0
+  name  = "autonetgen-redirect-url-map"
+
+  default_url_redirect {
+    redirect_response_code = "MOVED_PERMANENTLY_DEFAULT"
+    strip_query            = false
+    https_redirect         = true
+  }
+}
+
+# Global forwarding rule per HTTPS
+resource "google_compute_global_forwarding_rule" "autonetgen_https_forwarding_rule" {
+  count      = var.enable_load_balancer && var.load_balancer_domain != "" ? 1 : 0
+  name       = "autonetgen-https-forwarding-rule"
+  target     = google_compute_target_https_proxy.autonetgen_https_proxy[0].id
+  port_range = "443"
+  ip_address = google_compute_global_address.autonetgen_ip[0].address
+}
+
+# Global forwarding rule per HTTP
+resource "google_compute_global_forwarding_rule" "autonetgen_http_forwarding_rule" {
+  count      = var.enable_load_balancer ? 1 : 0
+  name       = "autonetgen-http-forwarding-rule"
+  target     = google_compute_target_http_proxy.autonetgen_http_proxy[0].id
+  port_range = "80"
+  ip_address = google_compute_global_address.autonetgen_ip[0].address
+}
+
+# === CONFIGURAZIONE ACCESSO AI SERVIZI ===
+
+# Accesso per il load balancer ai servizi Cloud Run
+resource "google_cloud_run_service_iam_member" "lb_invoker_frontend" {
+  count    = var.enable_load_balancer ? 1 : 0
   location = google_cloud_run_service.frontend.location
   project  = google_cloud_run_service.frontend.project
   service  = google_cloud_run_service.frontend.name
   role     = "roles/run.invoker"
-  member   = "allAuthenticatedUsers"
+  member   = "allUsers"
 }
-*/
 
-# SOLUZIONE 2: Accesso per domini specifici (ALTERNATIVA SICURA)
-# Decommentare e personalizzare se si vuole limitare l'accesso a domini specifici
-/*
-resource "google_cloud_run_service_iam_member" "frontend_domain_users" {
-  count    = length(var.authorized_domains)
-  location = google_cloud_run_service.frontend.location
-  project  = google_cloud_run_service.frontend.project
-  service  = google_cloud_run_service.frontend.name
+resource "google_cloud_run_service_iam_member" "lb_invoker_backend" {
+  count    = var.enable_load_balancer ? 1 : 0
+  location = google_cloud_run_service.backend.location
+  project  = google_cloud_run_service.backend.project
+  service  = google_cloud_run_service.backend.name
   role     = "roles/run.invoker"
-  member   = "domain:${var.authorized_domains[count.index]}"
+  member   = "allUsers"
 }
-*/
 
-# SOLUZIONE 3: Accesso per utenti/gruppi specifici (MASSIMA SICUREZZA)
-# Decommentare e personalizzare per utenti specifici
+# Configurazione accesso senza load balancer (come prima)
 resource "google_cloud_run_service_iam_member" "frontend_specific_users" {
-  count    = length(var.authorized_users)
+  count    = var.enable_load_balancer ? 0 : length(var.authorized_users)
   location = google_cloud_run_service.frontend.location
   project  = google_cloud_run_service.frontend.project
   service  = google_cloud_run_service.frontend.name
