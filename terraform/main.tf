@@ -564,17 +564,17 @@ resource "google_cloud_run_service_iam_member" "lb_invoker_frontend" {
   project  = google_cloud_run_service.frontend.project
   service  = google_cloud_run_service.frontend.name
   role     = "roles/run.invoker"
-  member   = "allUsers"
+   member   = var.authorized_users[count.index]
 }
 
-resource "google_cloud_run_service_iam_member" "lb_invoker_backend" {
-  count    = var.enable_load_balancer ? 1 : 0
-  location = google_cloud_run_service.backend.location
-  project  = google_cloud_run_service.backend.project
-  service  = google_cloud_run_service.backend.name
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
+#resource "google_cloud_run_service_iam_member" "lb_invoker_backend" {
+  #count    = var.enable_load_balancer ? 1 : 0
+  #location = google_cloud_run_service.backend.location
+  #project  = google_cloud_run_service.backend.project
+  #service  = google_cloud_run_service.backend.name
+  #role     = "roles/run.invoker"
+ #member   = "allUsers"
+#}
 
 # Configurazione accesso senza load balancer (come prima)
 resource "google_cloud_run_service_iam_member" "frontend_specific_users" {
