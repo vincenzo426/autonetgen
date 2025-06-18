@@ -86,7 +86,9 @@ setup_gcloud() {
         cloudbuild.googleapis.com \
         run.googleapis.com \
         storage-api.googleapis.com \
-        storage-component.googleapis.com
+        storage-component.googleapis.com \
+        cloudresourcemanager.googleapis.com \
+
     
     # Configura autenticazione Docker
     print_message "Configurazione autenticazione Docker..."
