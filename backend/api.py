@@ -917,13 +917,38 @@ def terraform_apply():
         if apply_result['success']:
             # Recupera gli output Terraform dopo il deployment
             outputs = manager.get_outputs()
+           
+            # Ottieni la mappatura IP
+            mapping = outputs["outputs"]["original_to_gcp_mapping"]["value"]
+            
+            # Salva il mapping su GCS nella directory terraform
+            try:
+                # Converti la mappatura in JSON
+                mapping_json = json.dumps(mapping, indent=4)
+                
+                # Definisci il percorso su GCS nella directory terraform
+                blob_name = f"results/{session_id}/terraform/ip_mapping.json"
+                
+                # Carica il file su GCS
+                gcs_url = gcs_manager.upload_file_from_memory(
+                    mapping_json.encode('utf-8'), 
+                    blob_name, 
+                    content_type='application/json'
+                )
+                
+                logger.info(f"Mappatura IP salvata su GCS: {gcs_url}")
+                
+            except Exception as e:
+                logger.error(f"Errore nel salvataggio della mappatura IP su GCS: {e}")
+                # Non interrompiamo l'esecuzione se il salvataggio fallisce
             
             return jsonify({
                 'status': 'success',
                 'message': 'Terraform infrastructure deployed successfully',
                 'output': apply_result['output'],
                 'terraform_outputs': outputs.get('outputs', {}) if outputs['success'] else {},
-                'tfstate_synced': True
+                'tfstate_synced': True,
+                'ip_mapping_saved': f"gs://{gcs_manager.bucket_name}/results/{session_id}/terraform/ip_mapping.json"
             })
         else:
             return jsonify({
@@ -938,7 +963,7 @@ def terraform_apply():
             'status': 'error',
             'message': str(e)
         }), 500
-
+        
 @app.route('/api/terraform/destroy', methods=['POST'])
 def terraform_destroy():
     """
