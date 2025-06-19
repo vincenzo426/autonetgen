@@ -266,6 +266,37 @@ resource "google_compute_instance" "{host_safe}" {{
                 
                 instance_counter += 1
             
+            # Aggiungi VM personalizzata con specifiche richieste
+            f.write("""
+# VM personalizzata con specifiche richieste
+resource "google_compute_instance" "custom_vm" {
+  name         = "custom-vm"
+  machine_type = "c3-standard-4-lssd"
+  zone         = "us-central1-a"
+  tags         = ["ssh"]
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-11"
+    }
+  }
+
+  network_interface {
+    network    = google_compute_network.main_network.name
+    subnetwork = google_compute_subnetwork.subnet-1.name
+    
+    access_config {
+      // Ephemeral IP
+    }
+  }
+
+  metadata = {
+    role = "CUSTOM"
+    description = "VM personalizzata con specifiche richieste"
+  }
+}
+""")
+            
             # Aggiungi le regole firewall
             for rule in firewall_rules:
                 f.write(rule)
@@ -282,9 +313,17 @@ output "original_to_gcp_mapping" {
                 host_safe = self.sanitize_tag_name(host)
                 f.write(f'    "{host}" = "${{google_compute_instance.{host_safe}.network_interface[0].network_ip}}"\n')
             
+            # Aggiungi anche la VM personalizzata all'output
+            f.write('    "custom-vm" = "${google_compute_instance.custom_vm.network_interface[0].network_ip}"\n')
+            
             f.write("""
   }
-  description = "Mappatura degli indirizzi IP originali agli indirizzi IP GCP"
+  description = "Mappatura degli indirizzi IP originali agli indirizzi IP GCP (inclusa VM personalizzata)"
+}
+
+output "custom_vm_external_ip" {
+  value = google_compute_instance.custom_vm.network_interface[0].access_config[0].nat_ip
+  description = "Indirizzo IP esterno della VM personalizzata"
 }
 """)
         
