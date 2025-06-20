@@ -584,7 +584,7 @@ resource "google_cloud_run_service_iam_member" "lb_invoker_frontend" {
   project  = google_cloud_run_service.frontend.project
   service  = google_cloud_run_service.frontend.name
   role     = "roles/run.invoker"
-  member   = "allUsers"
+  member   = var.authorized_users[count.index]
 }
 
 # Configurazione accesso senza load balancer
