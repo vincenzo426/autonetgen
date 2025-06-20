@@ -927,6 +927,102 @@ const apiService = {
       throw error;
     }
   },
+
+  /**
+   * Avvia il test di traffico sulla VM personalizzata
+   * @param {string} sessionId - ID della sessione
+   * @param {string} pcapFileName - Nome del file PCAP da utilizzare (opzionale)
+   * @returns {Promise<Object>} Risultato del test di traffico
+   */
+  runTrafficTest: async (sessionId, pcapFileName = null) => {
+    try {
+      const requestData = {
+        session_id: sessionId,
+      };
+
+      // Se è specificato un file PCAP particolare, includilo nella richiesta
+      if (pcapFileName) {
+        requestData.pcap_file = pcapFileName;
+      }
+
+      const response = await fetch(`${API_URL}/traffic/test`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || `HTTP error! Status: ${response.status}`
+        );
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error("Traffic test failed:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Ottiene lo stato del test di traffico in corso
+   * @param {string} sessionId - ID della sessione
+   * @returns {Promise<Object>} Stato del test di traffico
+   */
+  getTrafficTestStatus: async (sessionId) => {
+    try {
+      const response = await fetch(`${API_URL}/traffic/status/${sessionId}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || `HTTP error! Status: ${response.status}`
+        );
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error("Failed to get traffic test status:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Annulla il test di traffico in corso
+   * @param {string} sessionId - ID della sessione
+   * @returns {Promise<Object>} Risultato dell'annullamento
+   */
+  cancelTrafficTest: async (sessionId) => {
+    try {
+      const response = await fetch(`${API_URL}/traffic/cancel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || `HTTP error! Status: ${response.status}`
+        );
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error("Failed to cancel traffic test:", error);
+      throw error;
+    }
+  },
 };
 
 export default apiService;

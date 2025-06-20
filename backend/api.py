@@ -20,6 +20,7 @@ from analysis_orchestrator import AnalysisOrchestrator
 from config import logger, DEFAULT_OUTPUT_DIR
 from terraform_manager import TerraformManager
 from gcs_manager import GCSFileManager  # Import della nuova classe separata
+from traffic_test_manager import TrafficTestManager
 
 app = Flask(__name__)
 CORS(app, 
@@ -1194,6 +1195,114 @@ def restore_tfstate_from_backup():
     
     except Exception as e:
         logger.error(f"Error restoring tfstate from backup: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/traffic/test', methods=['POST'])
+def run_traffic_test():
+    """
+    Endpoint per avviare il test di traffico
+    """
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        pcap_file = data.get('pcap_file')  # Opzionale
+        
+        if not session_id:
+            return jsonify({
+                'status': 'error', 
+                'message': 'Session ID required'
+            }), 400
+        
+        # Inizializza il manager per i test di traffico
+        traffic_manager = TrafficTestManager(session_id, gcs_manager)
+        
+        # Esegui il test di traffico
+        test_result = traffic_manager.execute_traffic_test(pcap_file)
+        
+        if test_result['success']:
+            return jsonify({
+                'status': 'success',
+                'message': 'Traffic test completed successfully',
+                'output': test_result['output'],
+                'execution_time': test_result.get('execution_time'),
+                'files_processed': test_result.get('files_processed', {})
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Traffic test failed',
+                'error': test_result['error']
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Error during traffic test: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/traffic/status/<session_id>', methods=['GET'])
+def get_traffic_test_status(session_id):
+    """
+    Endpoint per ottenere lo stato del test di traffico
+    """
+    try:
+        if not session_id:
+            return jsonify({
+                'status': 'error', 
+                'message': 'Session ID required'
+            }), 400
+        
+        traffic_manager = TrafficTestManager(session_id, gcs_manager)
+        status = traffic_manager.get_test_status()
+        
+        return jsonify({
+            'status': 'success',
+            'test_status': status
+        })
+    
+    except Exception as e:
+        logger.error(f"Error getting traffic test status: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/traffic/cancel', methods=['POST'])
+def cancel_traffic_test():
+    """
+    Endpoint per annullare il test di traffico in corso
+    """
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        
+        if not session_id:
+            return jsonify({
+                'status': 'error', 
+                'message': 'Session ID required'
+            }), 400
+        
+        traffic_manager = TrafficTestManager(session_id, gcs_manager)
+        cancel_result = traffic_manager.cancel_test()
+        
+        if cancel_result['success']:
+            return jsonify({
+                'status': 'success',
+                'message': 'Traffic test cancelled successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to cancel traffic test',
+                'error': cancel_result['error']
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Error cancelling traffic test: {e}")
         return jsonify({
             'status': 'error',
             'message': str(e)
