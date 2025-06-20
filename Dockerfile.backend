@@ -16,13 +16,13 @@ RUN apt-get update && apt-get install -y \
     lsb-release \
     && rm -rf /var/lib/apt/lists/*
 
-ENV CLOUD_SDK_VERSION=525.0.0
-RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" \
+# Installa Google Cloud CLI (versione corretta)
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
     > /etc/apt/sources.list.d/google-cloud-sdk.list && \
     curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-    | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - && \
+    | gpg --dearmor > /usr/share/keyrings/cloud.google.gpg && \
     apt-get update -y && \
-    apt-get install -y google-cloud-sdk=$CLOUD_SDK_VERSION-0 && \
+    apt-get install -y google-cloud-cli && \
     rm -rf /var/lib/apt/lists/*
 
 # Installa Terraform
