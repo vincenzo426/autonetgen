@@ -25,7 +25,7 @@ class TrafficTestManager:
         """
         self.session_id = session_id
         self.gcs_manager = gcs_manager
-        self.vm_name = "custom-vm"
+        self.vm_name = "autonetgen-custom-vm "
         self.vm_zone = "us-central1-a"
         self.test_status = "idle"  # idle, running, completed, error
         self.test_thread = None
@@ -108,7 +108,7 @@ class TrafficTestManager:
             
             if self.gcs_manager.file_exists(mapping_blob):
                 self.gcs_manager.download_file_to_memory(mapping_blob)
-                logger.info(f"Downloaded IP mapping: {mapping_path}")
+                logger.info(f"Downloaded IP mapping: {mapping_blob}")
             else:
                 logger.warning("IP mapping file not found, test may not work correctly")
             
@@ -117,7 +117,7 @@ class TrafficTestManager:
                 pcap_file = self._find_pcap_file()
             
             if pcap_file:
-                pcap_blob = f"uploads/{self.session_id}/{pcap_file}"
+                pcap_blob = f"processes/{self.session_id}/{pcap_file}"
                 pcap_path = os.path.join(temp_dir, pcap_file)
                 
                 if self.gcs_manager.file_exists(pcap_blob):
@@ -140,7 +140,7 @@ class TrafficTestManager:
     def _find_pcap_file(self):
         """Trova automaticamente un file PCAP nella sessione"""
         try:
-            prefix = f"uploads/{self.session_id}/"
+            prefix = f"processed/{self.session_id}/"
             blobs = self.gcs_manager.bucket.list_blobs(prefix=prefix)
             
             for blob in blobs:
