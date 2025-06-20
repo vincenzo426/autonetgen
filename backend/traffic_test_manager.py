@@ -51,6 +51,7 @@ class TrafficTestManager:
             
             # 2. Verifica che la VM custom esista
             if not self._check_vm_exists():
+                logger.error(f"returned: {self._check_vm_exists()}")
                 raise Exception(f"VM {self.vm_name} not found in zone {self.vm_zone}")
             
             # 3. Copia il file PCAP sulla VM
@@ -291,6 +292,8 @@ print_message "Cleanup completato."
             ]
             
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            logger.info(f"Checking VM existence: {result.returncode}, {result.stdout.strip()}")
+
             return result.returncode == 0 and "RUNNING" in result.stdout
             
         except Exception as e:
