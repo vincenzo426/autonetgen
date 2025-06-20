@@ -1,4 +1,3 @@
-# Backend Dockerfile
 FROM python:3.11-slim
 
 # Imposta la directory di lavoro
@@ -13,7 +12,19 @@ RUN apt-get update && apt-get install -y \
     curl \
     wget \
     unzip \
+    gnupg \
+    lsb-release \
     && rm -rf /var/lib/apt/lists/*
+
+# Installa Google Cloud SDK
+ENV CLOUD_SDK_VERSION=475.0.0
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" \
+    > /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+    | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - && \
+    apt-get update -y && \
+    apt-get install -y google-cloud-sdk=$CLOUD_SDK_VERSION-0 && \
+    rm -rf /var/lib/apt/lists/*
 
 # Installa Terraform
 ARG TERRAFORM_VERSION=1.5.7
@@ -23,8 +34,8 @@ RUN wget https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform
     rm terraform_${TERRAFORM_VERSION}_linux_amd64.zip && \
     chmod +x /usr/local/bin/terraform
 
-# Verifica l'installazione di Terraform
-RUN terraform version
+# Verifica installazioni
+RUN terraform version && gcloud --version
 
 # Copia i requirements
 COPY backend/requirements.txt .
