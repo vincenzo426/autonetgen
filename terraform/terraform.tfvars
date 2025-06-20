@@ -45,7 +45,7 @@ authorized_users = [
 # === CONFIGURAZIONE DOMINIO (OPZIONALE) ===
 # domain_name = "autonetgen.tuodominio.com"
 
-# === NUOVA CONFIGURAZIONE VPC E LOAD BALANCER ===
+# === CONFIGURAZIONE VPC E LOAD BALANCER ===
 
 # Abilita Load Balancer HTTPS globale
 enable_load_balancer = true  # Cambia a true per abilitare
@@ -57,19 +57,30 @@ load_balancer_domain = ""  # Es: "autonetgen.example.com"
 # Se true, il frontend userà il load balancer per le chiamate API
 use_load_balancer = true  # Cambia a true se abiliti il Load Balancer
 
-# Configurazione CIDR per VPC e subnet
-vpc_cidr_range        = "10.0.0.0/16"
-frontend_subnet_cidr  = "10.1.0.0/24"
-backend_subnet_cidr   = "10.2.0.0/24"
-vpc_connector_cidr    = "10.8.0.0/28"
+# === CONFIGURAZIONE NETWORKING ===
+
+# Configurazione CIDR per VPC principale
+vpc_cidr_range = "10.0.0.0/16"
+
+# Subnet del backend - UNICA SUBNET dove vengono create tutte le risorse
+# Le VM e altri componenti generati dal backend saranno posizionati qui
+backend_subnet_cidr = "10.2.0.0/24"
+
+# VPC Connector per collegare solo il backend Cloud Run alla VPC
+# Il frontend rimane in modalità standard Cloud Run (senza VPC)
+vpc_connector_cidr = "10.8.0.0/28"
 
 # Configurazione VPC Connector (throughput in Mbps)
 vpc_connector_min_throughput = 200
 vpc_connector_max_throughput = 300
 
-# Configurazione avanzata networking
-enable_vpc_flow_logs = false  # Abilita per debugging (comporta costi)
-nat_log_filter      = "ERRORS_ONLY"  # ERRORS_ONLY, TRANSLATIONS_ONLY, ALL
+# === CONFIGURAZIONE AVANZATA NETWORKING ===
+
+# Abilita flow logs per debugging (comporta costi aggiuntivi)
+enable_vpc_flow_logs = false
+
+# Filtro log Cloud NAT (ERRORS_ONLY per costi ridotti)
+nat_log_filter = "ERRORS_ONLY"  # ERRORS_ONLY, TRANSLATIONS_ONLY, ALL
 
 # === LABELS PER GESTIONE RISORSE ===
 labels = {

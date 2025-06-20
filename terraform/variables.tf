@@ -82,7 +82,7 @@ variable "cpu_limit" {
   
   validation {
     condition = contains(["0.25", "0.5", "1", "2", "4", "8", "10"], var.cpu_limit)
-    error_message = "I valori CPU supportati sono: 0.25, 0.5, 1, 2."
+    error_message = "I valori CPU supportati sono: 0.25, 0.5, 1, 2, 4, 8, 10."
   }
 }
 
@@ -93,7 +93,7 @@ variable "memory_limit" {
   
   validation {
     condition = contains(["256Mi", "512Mi", "1Gi", "2Gi", "4Gi", "8Gi", "16Gi"], var.memory_limit)
-    error_message = "I valori memoria supportati sono: 256Mi, 512Mi, 1Gi, 2Gi, 4Gi."
+    error_message = "I valori memoria supportati sono: 256Mi, 512Mi, 1Gi, 2Gi, 4Gi, 8Gi, 16Gi."
   }
 }
 
@@ -169,7 +169,7 @@ variable "domain_name" {
   default     = ""
 }
 
-# === NUOVE VARIABILI PER VPC E LOAD BALANCER ===
+# === VARIABILI PER VPC E LOAD BALANCER ===
 
 variable "enable_load_balancer" {
   description = "Abilita il Load Balancer HTTPS globale"
@@ -205,19 +205,8 @@ variable "vpc_cidr_range" {
   }
 }
 
-variable "frontend_subnet_cidr" {
-  description = "Range CIDR per la subnet del frontend"
-  type        = string
-  default     = "10.1.0.0/24"
-  
-  validation {
-    condition     = can(cidrhost(var.frontend_subnet_cidr, 0))
-    error_message = "Il frontend_subnet_cidr deve essere un range CIDR valido."
-  }
-}
-
 variable "backend_subnet_cidr" {
-  description = "Range CIDR per la subnet del backend"
+  description = "Range CIDR per la subnet del backend (dove vengono create le risorse generate)"
   type        = string
   default     = "10.2.0.0/24"
   

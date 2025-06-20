@@ -33,25 +33,13 @@ resource "google_compute_network" "autonetgen_vpc" {
   depends_on = [google_project_service.required_apis]
 }
 
-# Subnet per il frontend
-resource "google_compute_subnetwork" "frontend_subnet" {
-  name          = "autonetgen-frontend-subnet"
-  ip_cidr_range = "10.1.0.0/24"
-  region        = var.region
-  network       = google_compute_network.autonetgen_vpc.id
-  description   = "Subnet per il frontend AutoNetGen"
-
-  # Configurazione per servizi Google
-  private_ip_google_access = true
-}
-
-# Subnet per il backend
+# Subnet per il backend (unica subnet)
 resource "google_compute_subnetwork" "backend_subnet" {
   name          = "autonetgen-backend-subnet"
-  ip_cidr_range = "10.2.0.0/24"
+  ip_cidr_range = var.backend_subnet_cidr
   region        = var.region
   network       = google_compute_network.autonetgen_vpc.id
-  description   = "Subnet per il backend AutoNetGen"
+  description   = "Subnet per il backend AutoNetGen e risorse generate"
 
   # Configurazione per servizi Google
   private_ip_google_access = true
@@ -77,19 +65,19 @@ resource "google_compute_router_nat" "autonetgen_nat" {
 
   log_config {
     enable = true
-    filter = "ERRORS_ONLY"
+    filter = var.nat_log_filter
   }
 }
 
-# VPC Connector per Cloud Run
+# VPC Connector per Cloud Run Backend
 resource "google_vpc_access_connector" "autonetgen_connector" {
   name          = "autonetgen-connector"
   region        = var.region
   network       = google_compute_network.autonetgen_vpc.name
-  ip_cidr_range = "10.8.0.0/28"
+  ip_cidr_range = var.vpc_connector_cidr
   
-  min_throughput = 200
-  max_throughput = 300
+  min_throughput = var.vpc_connector_min_throughput
+  max_throughput = var.vpc_connector_max_throughput
 
   depends_on = [google_project_service.required_apis]
 }
@@ -106,7 +94,29 @@ resource "google_compute_firewall" "allow_lb_health_check" {
 
   # IP ranges per Google Load Balancer health checks
   source_ranges = ["130.211.0.0/22", "35.191.0.0/16"]
-  target_tags   = ["autonetgen-backend", "autonetgen-frontend"]
+  target_tags   = ["autonetgen-backend"]
+}
+
+# Firewall rule per comunicazione interna nella subnet backend
+resource "google_compute_firewall" "allow_internal_backend" {
+  name    = "autonetgen-allow-internal-backend"
+  network = google_compute_network.autonetgen_vpc.name
+
+  allow {
+    protocol = "tcp"
+  }
+
+  allow {
+    protocol = "udp"
+  }
+
+  allow {
+    protocol = "icmp"
+  }
+
+  # Permettere comunicazione interna nella subnet backend
+  source_ranges = [var.backend_subnet_cidr]
+  target_tags   = ["autonetgen-backend", "autonetgen-generated"]
 }
 
 # === PERMESSI AGGIUNTIVI PER TERRAFORM DEPLOYMENT SUL BACKEND ===
@@ -154,7 +164,7 @@ resource "google_storage_bucket" "autonetgen_storage" {
   # Gestione del lifecycle per ridurre i costi
   lifecycle_rule {
     condition {
-      age = 30
+      age = var.storage_retention_days
     }
     action {
       type = "Delete"
@@ -163,7 +173,7 @@ resource "google_storage_bucket" "autonetgen_storage" {
   
   # CORS per permettere uploads dal frontend
   cors {
-    origin          = ["*"]
+    origin          = var.cors_origins
     method          = ["GET", "POST", "PUT", "DELETE"]
     response_header = ["*"]
     max_age_seconds = 3600
@@ -174,7 +184,7 @@ resource "google_storage_bucket" "autonetgen_storage" {
   depends_on = [google_project_service.required_apis]
 }
 
-# Service Account per Cloud Run
+# Service Account per Cloud Run Backend
 resource "google_service_account" "autonetgen_sa" {
   account_id   = "autonetgen-service"
   display_name = "AutoNetGen Service Account"
@@ -198,7 +208,7 @@ resource "google_service_account_key" "autonetgen_sa_key" {
   public_key_type = "TYPE_X509_PEM_FILE"
 }
 
-# Cloud Run service per il backend (PRIVATO)
+# Cloud Run service per il backend (PRIVATO - con VPC)
 resource "google_cloud_run_service" "backend" {
   name     = "autonetgen-backend"
   location = var.region
@@ -233,13 +243,29 @@ resource "google_cloud_run_service" "backend" {
           value = "1"
         }
 
+        # Variabili per le risorse di rete generate
+        env {
+          name  = "BACKEND_SUBNET_NAME"
+          value = google_compute_subnetwork.backend_subnet.name
+        }
+        
+        env {
+          name  = "BACKEND_SUBNET_CIDR"
+          value = google_compute_subnetwork.backend_subnet.ip_cidr_range
+        }
+        
+        env {
+          name  = "VPC_NETWORK_NAME"
+          value = google_compute_network.autonetgen_vpc.name
+        }
+
         # Chiave del service account direttamente come variabile di ambiente
         env {
           name  = "GOOGLE_APPLICATION_CREDENTIALS_JSON"
           value = base64decode(google_service_account_key.autonetgen_sa_key.private_key)
         }
         
-        # Configurazione risorse economica
+        # Configurazione risorse
         resources {
           limits = {
             cpu    = var.cpu_limit
@@ -317,7 +343,7 @@ resource "google_cloud_run_service_iam_member" "frontend_invoke_backend" {
   member   = "serviceAccount:${google_service_account.frontend_sa.email}"
 }
 
-# Cloud Run service per il frontend
+# Cloud Run service per il frontend (PUBBLICO - senza VPC)
 resource "google_cloud_run_service" "frontend" {
   name     = "autonetgen-frontend"
   location = var.region
@@ -358,8 +384,7 @@ resource "google_cloud_run_service" "frontend" {
         "autoscaling.knative.dev/minScale" = "0"
         "autoscaling.knative.dev/maxScale" = "2"
         "run.googleapis.com/execution-environment" = "gen2"
-        "run.googleapis.com/vpc-access-connector"  = google_vpc_access_connector.autonetgen_connector.id
-        "run.googleapis.com/vpc-access-egress"     = "private-ranges-only"
+        # NOTA: Frontend senza VPC connector - modalità standard Cloud Run
       }
     }
   }
@@ -370,8 +395,7 @@ resource "google_cloud_run_service" "frontend" {
   }
   
   depends_on = [
-    google_project_service.required_apis,
-    google_vpc_access_connector.autonetgen_connector
+    google_project_service.required_apis
   ]
 }
 
@@ -407,8 +431,6 @@ resource "google_compute_backend_service" "frontend_backend" {
     group = google_compute_region_network_endpoint_group.frontend_neg[0].id
   }
 
-  #health_checks = [google_compute_health_check.frontend_health_check[0].id]
-
   log_config {
     enable = true
   }
@@ -427,8 +449,6 @@ resource "google_compute_backend_service" "backend_backend" {
   backend {
     group = google_compute_region_network_endpoint_group.backend_neg[0].id
   }
-
-  #health_checks = [google_compute_health_check.backend_health_check[0].id]
 
   log_config {
     enable = true
@@ -564,19 +584,10 @@ resource "google_cloud_run_service_iam_member" "lb_invoker_frontend" {
   project  = google_cloud_run_service.frontend.project
   service  = google_cloud_run_service.frontend.name
   role     = "roles/run.invoker"
-   member   = var.authorized_users[count.index]
+  member   = "allUsers"
 }
 
-#resource "google_cloud_run_service_iam_member" "lb_invoker_backend" {
-  #count    = var.enable_load_balancer ? 1 : 0
-  #location = google_cloud_run_service.backend.location
-  #project  = google_cloud_run_service.backend.project
-  #service  = google_cloud_run_service.backend.name
-  #role     = "roles/run.invoker"
- #member   = "allUsers"
-#}
-
-# Configurazione accesso senza load balancer (come prima)
+# Configurazione accesso senza load balancer
 resource "google_cloud_run_service_iam_member" "frontend_specific_users" {
   count    = var.enable_load_balancer ? 0 : length(var.authorized_users)
   location = google_cloud_run_service.frontend.location

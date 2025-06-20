@@ -92,18 +92,23 @@ output "vpc_network_name" {
   value       = google_compute_network.autonetgen_vpc.name
 }
 
-output "frontend_subnet_id" {
-  description = "ID della subnet del frontend"
-  value       = google_compute_subnetwork.frontend_subnet.id
-}
-
 output "backend_subnet_id" {
-  description = "ID della subnet del backend"
+  description = "ID della subnet del backend (dove vengono create le risorse generate)"
   value       = google_compute_subnetwork.backend_subnet.id
 }
 
+output "backend_subnet_name" {
+  description = "Nome della subnet del backend"
+  value       = google_compute_subnetwork.backend_subnet.name
+}
+
+output "backend_subnet_cidr" {
+  description = "Range CIDR della subnet del backend"
+  value       = google_compute_subnetwork.backend_subnet.ip_cidr_range
+}
+
 output "vpc_connector_id" {
-  description = "ID del VPC Connector"
+  description = "ID del VPC Connector (solo per backend)"
   value       = google_vpc_access_connector.autonetgen_connector.id
 }
 
@@ -124,6 +129,7 @@ output "deployment_info" {
       service_name      = google_cloud_run_service.frontend.name
       location          = google_cloud_run_service.frontend.location
       service_account   = google_service_account.frontend_sa.email
+      vpc_connected     = false  # Frontend senza VPC
     }
     backend = {
       url               = var.enable_load_balancer && var.load_balancer_domain != "" ? "https://${var.load_balancer_domain}/api" : google_cloud_run_service.backend.status[0].url
@@ -131,6 +137,9 @@ output "deployment_info" {
       service_name      = google_cloud_run_service.backend.name
       location          = google_cloud_run_service.backend.location
       service_account   = google_service_account.autonetgen_sa.email
+      vpc_connected     = true   # Backend con VPC
+      target_subnet     = google_compute_subnetwork.backend_subnet.name
+      target_subnet_cidr = google_compute_subnetwork.backend_subnet.ip_cidr_range
     }
     
     # Storage
@@ -142,13 +151,29 @@ output "deployment_info" {
     # Networking
     networking = {
       vpc_name            = google_compute_network.autonetgen_vpc.name
-      frontend_subnet     = google_compute_subnetwork.frontend_subnet.name
       backend_subnet      = google_compute_subnetwork.backend_subnet.name
+      backend_subnet_cidr = google_compute_subnetwork.backend_subnet.ip_cidr_range
       vpc_connector       = google_vpc_access_connector.autonetgen_connector.name
       load_balancer_enabled = var.enable_load_balancer
       load_balancer_ip    = var.enable_load_balancer ? google_compute_global_address.autonetgen_ip[0].address : null
       load_balancer_domain = var.load_balancer_domain != "" ? var.load_balancer_domain : null
     }
+  }
+}
+
+# === OUTPUT CONFIGURAZIONE PER IL BACKEND ===
+
+output "backend_terraform_config" {
+  description = "Configurazione di rete per il backend Terraform"
+  value = {
+    project_id          = var.project_id
+    region              = var.region
+    vpc_network_name    = google_compute_network.autonetgen_vpc.name
+    target_subnet_name  = google_compute_subnetwork.backend_subnet.name
+    target_subnet_cidr  = google_compute_subnetwork.backend_subnet.ip_cidr_range
+    firewall_tags       = ["autonetgen-generated"]  # Tag da usare per le VM generate
+    nat_gateway_name    = google_compute_router_nat.autonetgen_nat.name
+    router_name         = google_compute_router.autonetgen_router.name
   }
 }
 
@@ -171,7 +196,11 @@ output "quick_access_commands" {
     # Networking
     describe_vpc       = "gcloud compute networks describe ${google_compute_network.autonetgen_vpc.name} --project=${var.project_id}"
     list_subnets       = "gcloud compute networks subnets list --network=${google_compute_network.autonetgen_vpc.name} --project=${var.project_id}"
+    describe_backend_subnet = "gcloud compute networks subnets describe ${google_compute_subnetwork.backend_subnet.name} --region=${var.region} --project=${var.project_id}"
     describe_nat       = "gcloud compute routers nats describe ${google_compute_router_nat.autonetgen_nat.name} --router=${google_compute_router.autonetgen_router.name} --region=${var.region} --project=${var.project_id}"
+    
+    # VM nella subnet backend
+    list_backend_vms   = "gcloud compute instances list --filter='networkInterfaces.subnetwork:${google_compute_subnetwork.backend_subnet.name}' --project=${var.project_id}"
     
     # Load Balancer (se abilitato)
     describe_lb        = var.enable_load_balancer ? "gcloud compute url-maps describe ${google_compute_url_map.autonetgen_url_map[0].name} --project=${var.project_id}" : "Load Balancer non abilitato"
@@ -205,8 +234,9 @@ output "estimated_monthly_cost" {
     vpc_costs          = "~$1-2 USD (VPC Connector e Cloud NAT)"
     load_balancer_costs = var.enable_load_balancer ? "~$18-25 USD (Load Balancer globale)" : "$0 (disabilitato)"
     network_egress      = "~$0-5 USD (dipende dal traffico)"
-    total_estimated     = var.enable_load_balancer ? "~$20-40 USD/mese" : "~$2-15 USD/mese"
-    note               = "I costi dipendono dall'utilizzo effettivo. Cloud Run scala a zero quando non in uso. Il Load Balancer ha un costo fisso mensile."
+    compute_instances   = "~$0-X USD (dipende dalle VM generate dal backend)"
+    total_estimated     = var.enable_load_balancer ? "~$20-45+ USD/mese" : "~$2-20+ USD/mese"
+    note               = "I costi dipendono dall'utilizzo effettivo e dalle risorse generate dal backend. Cloud Run scala a zero quando non in uso."
   }
 }
 
@@ -215,12 +245,15 @@ output "estimated_monthly_cost" {
 output "security_info" {
   description = "Informazioni sulla sicurezza del deployment"
   value = {
-    vpc_isolation       = "Servizi isolati in VPC privata con egress controllato"
+    frontend_isolation  = "Frontend in modalità standard Cloud Run (pubblico con IAM)"
+    backend_isolation   = "Backend isolato in VPC privata con VPC connector"
+    vpc_isolation       = "Risorse generate isolate nella subnet backend con egress controllato"
     cloud_run_access    = var.enable_load_balancer ? "Accesso tramite Load Balancer" : "Accesso diretto con IAM"
     ssl_status         = var.enable_load_balancer && var.load_balancer_domain != "" ? "Certificato SSL gestito automaticamente" : "HTTPS nativo Cloud Run"
-    firewall_rules     = "Regole firewall configurate per health check Load Balancer"
+    firewall_rules     = "Regole firewall configurate per comunicazione interna e health check"
     nat_gateway        = "Cloud NAT configurato per accesso internet in uscita"
     service_accounts   = "Service account dedicati con principio del minimo privilegio"
+    generated_resources = "Risorse generate hanno tag 'autonetgen-generated' per identificazione"
   }
 }
 
@@ -231,9 +264,11 @@ output "monitoring_urls" {
   value = {
     cloud_console_run      = "https://console.cloud.google.com/run?project=${var.project_id}"
     cloud_console_vpc      = "https://console.cloud.google.com/networking/networks/details/${google_compute_network.autonetgen_vpc.name}?project=${var.project_id}"
+    cloud_console_backend_subnet = "https://console.cloud.google.com/networking/subnetworks/details/${var.region}/${google_compute_subnetwork.backend_subnet.name}?project=${var.project_id}"
     cloud_console_lb       = var.enable_load_balancer ? "https://console.cloud.google.com/net-services/loadbalancing/loadBalancers/list?project=${var.project_id}" : null
     cloud_console_storage  = "https://console.cloud.google.com/storage/browser/${google_storage_bucket.autonetgen_storage.name}?project=${var.project_id}"
     cloud_console_logs     = "https://console.cloud.google.com/logs/query?project=${var.project_id}"
     cloud_console_monitoring = "https://console.cloud.google.com/monitoring?project=${var.project_id}"
+    cloud_console_compute  = "https://console.cloud.google.com/compute/instances?project=${var.project_id}"
   }
 }

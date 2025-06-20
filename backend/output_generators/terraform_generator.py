@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 TerraformGenerator - generatore di configurazioni Terraform per GCP
+Versione modificata per utilizzare l'infrastruttura VPC esistente
 """
 
 import os
@@ -8,16 +9,32 @@ from config import logger, GCP_PROJECT_ID, GCP_REGION, GCP_ZONE
 from output_generators.base_generator import OutputGenerator
 
 class TerraformGenerator(OutputGenerator):
-    """Generatore di configurazioni Terraform per GCP"""
+    """Generatore di configurazioni Terraform per GCP utilizzando infrastruttura esistente"""
+    
+    def __init__(self):
+        """Inizializza il generatore leggendo la configurazione di rete esistente"""
+        # Leggi configurazione di rete dalle variabili di ambiente
+        self.vpc_network_name = os.getenv('VPC_NETWORK_NAME', 'autonetgen-vpc')
+        self.backend_subnet_name = os.getenv('BACKEND_SUBNET_NAME', 'autonetgen-backend-subnet')
+        self.backend_subnet_cidr = os.getenv('BACKEND_SUBNET_CIDR', '10.2.0.0/24')
+        self.project_id = os.getenv('GOOGLE_CLOUD_PROJECT', GCP_PROJECT_ID)
+        
+        logger.info(f"TerraformGenerator configurato per:")
+        logger.info(f"  - VPC: {self.vpc_network_name}")
+        logger.info(f"  - Subnet: {self.backend_subnet_name}")
+        logger.info(f"  - CIDR: {self.backend_subnet_cidr}")
+        logger.info(f"  - Project: {self.project_id}")
+
     def sanitize_tag_name(self, ip):
-      tag = ip.replace('.', '-')
-      if not tag[0].isalpha():
-        tag = f"host-{tag}"  # prefix per rendere il tag valido
-      return tag
+        """Sanitizza un indirizzo IP per renderlo un tag valido"""
+        tag = ip.replace('.', '-')
+        if not tag[0].isalpha():
+            tag = f"host-{tag}"  # prefix per rendere il tag valido
+        return tag
 
     def generate(self, data, output_dir):
         """
-        Genera i file di configurazione Terraform per GCP
+        Genera i file di configurazione Terraform per GCP utilizzando l'infrastruttura esistente
         
         Args:
             data (dict): Dizionario con i dati da utilizzare per la generazione
@@ -27,6 +44,7 @@ class TerraformGenerator(OutputGenerator):
             str: Percorso della directory di output o None in caso di errore
         """
         logger.info(f"Generazione della configurazione Terraform in {output_dir}")
+        logger.info(f"Utilizzo infrastruttura esistente: VPC {self.vpc_network_name}, Subnet {self.backend_subnet_name}")
         
         # Estrai i dati necessari
         network_graph = data['network_graph']
@@ -41,7 +59,7 @@ class TerraformGenerator(OutputGenerator):
         with open(provider_file, 'w') as f:
             f.write(f"""
 provider "google" {{
-  project = "{GCP_PROJECT_ID}"
+  project = "{self.project_id}"
   region  = "{GCP_REGION}"
   zone    = "{GCP_ZONE}"
 }}
@@ -56,77 +74,86 @@ terraform {{
 }}
 """)
         
-        # File per la rete VPC
+        # File per la configurazione di rete (utilizzo infrastruttura esistente)
         network_file = os.path.join(output_dir, "network.tf")
         with open(network_file, 'w') as f:
-            f.write("""
-# Rete VPC principale
-resource "google_compute_network" "main_network" {
-  name                    = "inferred-network"
-  auto_create_subnetworks = false
-}
+            f.write(f"""
+# === RIFERIMENTI ALL'INFRASTRUTTURA ESISTENTE ===
+# Queste risorse esistono già e vengono solo referenziate
 
-# Firewall per permettere l'SSH
-resource "google_compute_firewall" "allow_ssh" {
-  name    = "allow-ssh"
-  network = google_compute_network.main_network.name
+# Riferimento alla VPC esistente
+data "google_compute_network" "existing_vpc" {{
+  name = "{self.vpc_network_name}"
+}}
 
-  allow {
+# Riferimento alla subnet backend esistente
+data "google_compute_subnetwork" "existing_backend_subnet" {{
+  name   = "{self.backend_subnet_name}"
+  region = "{GCP_REGION}"
+}}
+
+# === REGOLE FIREWALL PER LE RISORSE GENERATE ===
+
+# Firewall per permettere l'SSH alle risorse generate
+resource "google_compute_firewall" "allow_ssh_generated" {{
+  name    = "allow-ssh-autonetgen-generated"
+  network = data.google_compute_network.existing_vpc.name
+
+  allow {{
     protocol = "tcp"
     ports    = ["22"]
-  }
+  }}
 
-  source_ranges = ["0.0.0.0/0"]
-  target_tags   = ["ssh"]
-}
-""")
-        
-        # Ottieni subnet uniche
-        unique_subnets = set(subnets.values())
-        subnet_counter = 1
-        subnet_resources = []
-        
-        # Crea subnet CIDR non sovrapposti per GCP
-        gcp_subnet_map = {}
-        for subnet in unique_subnets:
-            subnet_name = f"subnet-{subnet_counter}"
-            gcp_cidr = f"10.{subnet_counter}.0.0/24"
-            gcp_subnet_map[subnet] = {
-                "name": subnet_name,
-                "cidr": gcp_cidr
-            }
-            
-            subnet_resources.append(f"""
-resource "google_compute_subnetwork" "{subnet_name}" {{
-  name          = "{subnet_name}"
-  network       = google_compute_network.main_network.name
-  ip_cidr_range = "{gcp_cidr}"
-  region        = "us-central1"
+  # Permetti SSH da tutta la subnet backend per amministrazione
+  source_ranges = ["{self.backend_subnet_cidr}"]
+  target_tags   = ["autonetgen-generated", "ssh-access"]
+}}
+
+# Firewall per comunicazione interna tra risorse generate
+resource "google_compute_firewall" "allow_internal_generated" {{
+  name    = "allow-internal-autonetgen-generated"
+  network = data.google_compute_network.existing_vpc.name
+
+  allow {{
+    protocol = "tcp"
+  }}
+
+  allow {{
+    protocol = "udp"
+  }}
+
+  allow {{
+    protocol = "icmp"
+  }}
+
+  # Comunicazione interna nella subnet backend
+  source_ranges = ["{self.backend_subnet_cidr}"]
+  target_tags   = ["autonetgen-generated"]
 }}
 """)
-            subnet_counter += 1
-        
-        # Aggiungi le subnet al file di rete
-        with open(network_file, 'a') as f:
-            for subnet_resource in subnet_resources:
-                f.write(subnet_resource)
         
         # Crea le istanze VM per ogni host
         instances_file = os.path.join(output_dir, "instances.tf")
         with open(instances_file, 'w') as f:
+            f.write(f"""
+# === VM GENERATE DA AUTONETGEN ===
+# Tutte le VM vengono create nella subnet backend esistente: {self.backend_subnet_name}
+# CIDR subnet: {self.backend_subnet_cidr}
+# Accesso internet tramite Cloud NAT (nessun IP pubblico assegnato)
+
+""")
+            
             # Instanze per host
             instance_counter = 1
             firewall_rules = []
             
             for host, role in host_roles.items():
                 host_safe = self.sanitize_tag_name(host)
-                subnet = subnets.get(host, list(unique_subnets)[0] if unique_subnets else "unknown")
-                subnet_resource = gcp_subnet_map.get(subnet, {"name": "subnet-1", "cidr": "10.1.0.0/24"})
                 
                 # Determina il tipo di macchina e l'immagine in base al ruolo
                 machine_type = "e2-micro"  # default economico
                 boot_disk_image = "debian-cloud/debian-11"
-                tags = ["ssh"]
+                tags = ["autonetgen-generated", "ssh-access"]
                 startup_script = ""
                 
                 if "SERVER" in role:
@@ -170,7 +197,7 @@ EOF
                     startup_script = """
                     apt-get update
                     apt-get install -y nginx
-                    echo '<html><body><h1>Web Server Emulato</h1></body></html>' > /var/www/html/index.html
+                    echo '<html><body><h1>Web Server Emulato - AutoNetGen</h1><p>Deployato nella subnet backend</p></body></html>' > /var/www/html/index.html
                     systemctl enable nginx
                     systemctl start nginx
                     """
@@ -182,7 +209,7 @@ EOF
                     apt-get install -y mariadb-server
                     systemctl enable mariadb
                     systemctl start mariadb
-                    mysql -e "CREATE DATABASE test_db;"
+                    mysql -e "CREATE DATABASE autonetgen_test_db;"
                     """
                 
                 # Ottieni le porte utilizzate da questo host
@@ -215,27 +242,30 @@ EOF
                             fw_name = f"allow-{host_safe}-{proto}-chunk-{chunk_index}"
 
                             fw_rule = f"""
+# Regola firewall per {host} ({role})
 resource "google_compute_firewall" "{fw_name}" {{
   name    = "{fw_name}"
-  network = google_compute_network.main_network.name
+  network = data.google_compute_network.existing_vpc.name
 
   allow {{
     protocol = "{proto}"
     ports    = [{', '.join([f'"{p}"' for p in chunk_ports])}]
   }}
 
-  source_ranges = ["0.0.0.0/0"]
+  # Permetti accesso da tutta la subnet backend
+  source_ranges = ["{self.backend_subnet_cidr}"]
   target_tags   = ["{host_safe}"]
 }}
 """
                             firewall_rules.append(fw_rule)
                 
-                # Crea l'istanza VM
+                # Crea l'istanza VM nella subnet backend esistente
                 f.write(f"""
+# VM per host {host} con ruolo {role}
 resource "google_compute_instance" "{host_safe}" {{
   name         = "{host_safe}"
   machine_type = "{machine_type}"
-  zone         = "us-central1-a"
+  zone         = "{GCP_ZONE}"
   tags         = {str(tags + [host_safe]).replace("'", '"')}
 
   boot_disk {{
@@ -245,12 +275,12 @@ resource "google_compute_instance" "{host_safe}" {{
   }}
 
   network_interface {{
-    network    = google_compute_network.main_network.name
-    subnetwork = google_compute_subnetwork.{subnet_resource['name']}.name
+    # Utilizzo della VPC e subnet esistenti
+    network    = data.google_compute_network.existing_vpc.name
+    subnetwork = data.google_compute_subnetwork.existing_backend_subnet.name
     
-    access_config {{
-      // Ephemeral IP
-    }}
+    # IMPORTANTE: Nessun access_config = nessun IP pubblico
+    # Accesso internet tramite Cloud NAT configurato nell'infrastruttura principale
   }}
 
   metadata_startup_script = <<-EOT
@@ -260,6 +290,16 @@ resource "google_compute_instance" "{host_safe}" {{
   metadata = {{
     role = "{role}"
     original_ip = "{host}"
+    created_by = "autonetgen"
+    subnet = "{self.backend_subnet_name}"
+    vpc = "{self.vpc_network_name}"
+  }}
+
+  # Etichette per identificazione e gestione
+  labels = {{
+    created-by = "autonetgen"
+    role = "{role.lower().replace('_', '-')}"
+    original-host = "{host.replace('.', '-')}"
   }}
 }}
 """)
@@ -267,46 +307,76 @@ resource "google_compute_instance" "{host_safe}" {{
                 instance_counter += 1
             
             # Aggiungi VM personalizzata con specifiche richieste
-            f.write("""
-# VM personalizzata con specifiche richieste
-resource "google_compute_instance" "custom_vm" {
-  name         = "custom-vm"
+            f.write(f"""
+# === VM PERSONALIZZATA ===
+# VM personalizzata con specifiche richieste nella subnet backend
+resource "google_compute_instance" "custom_vm" {{
+  name         = "autonetgen-custom-vm"
   machine_type = "c3-standard-4-lssd"
-  zone         = "us-central1-a"
-  tags         = ["ssh"]
+  zone         = "{GCP_ZONE}"
+  tags         = ["autonetgen-generated", "ssh-access", "custom"]
 
-  boot_disk {
-    initialize_params {
+  boot_disk {{
+    initialize_params {{
       image = "debian-cloud/debian-11"
-    }
-  }
+      size  = 50  # GB
+    }}
+  }}
 
-  network_interface {
-    network    = google_compute_network.main_network.name
-    subnetwork = google_compute_subnetwork.subnet-1.name
+  network_interface {{
+    # Utilizzo della VPC e subnet esistenti
+    network    = data.google_compute_network.existing_vpc.name
+    subnetwork = data.google_compute_subnetwork.existing_backend_subnet.name
     
-    access_config {
-      // Ephemeral IP
-    }
-  }
+    # Nessun IP pubblico - accesso tramite Cloud NAT
+  }}
 
-  metadata = {
+  metadata_startup_script = <<-EOT
+    apt-get update
+    apt-get install -y htop wget curl git python3-pip
+    echo "VM personalizzata AutoNetGen configurata correttamente" > /var/log/autonetgen-setup.log
+  EOT
+
+  metadata = {{
     role = "CUSTOM"
     description = "VM personalizzata con specifiche richieste"
-  }
-}
+    created_by = "autonetgen"
+    subnet = "{self.backend_subnet_name}"
+    vpc = "{self.vpc_network_name}"
+  }}
+
+  labels = {{
+    created-by = "autonetgen"
+    role = "custom"
+    type = "high-performance"
+  }}
+}}
 """)
             
             # Aggiungi le regole firewall
             for rule in firewall_rules:
                 f.write(rule)
         
-        # Crea un file di output con la mappatura degli indirizzi IP originali
+        # Crea un file di output con la mappatura degli indirizzi IP
         outputs_file = os.path.join(output_dir, "outputs.tf")
         with open(outputs_file, 'w') as f:
-            f.write("""
-output "original_to_gcp_mapping" {
-  value = {
+            f.write(f"""
+# === OUTPUT DELLA CONFIGURAZIONE AUTONETGEN ===
+
+output "deployment_info" {{
+  value = {{
+    vpc_network = "{self.vpc_network_name}"
+    backend_subnet = "{self.backend_subnet_name}"
+    subnet_cidr = "{self.backend_subnet_cidr}"
+    region = "{GCP_REGION}"
+    zone = "{GCP_ZONE}"
+    project_id = "{self.project_id}"
+  }}
+  description = "Informazioni sul deployment nella subnet backend"
+}}
+
+output "original_to_gcp_mapping" {{
+  value = {{
 """)
             
             for host in host_roles:
@@ -316,16 +386,83 @@ output "original_to_gcp_mapping" {
             # Aggiungi anche la VM personalizzata all'output
             f.write('    "custom-vm" = "${google_compute_instance.custom_vm.network_interface[0].network_ip}"\n')
             
-            f.write("""
-  }
-  description = "Mappatura degli indirizzi IP originali agli indirizzi IP GCP (inclusa VM personalizzata)"
-}
+            f.write(f"""
+  }}
+  description = "Mappatura degli indirizzi IP originali agli indirizzi IP nella subnet backend {self.backend_subnet_name}"
+}}
 
-output "custom_vm_external_ip" {
-  value = google_compute_instance.custom_vm.network_interface[0].access_config[0].nat_ip
-  description = "Indirizzo IP esterno della VM personalizzata"
-}
+output "vm_details" {{
+  value = {{
+""")
+            
+            for host in host_roles:
+                host_safe = self.sanitize_tag_name(host)
+                f.write(f"""    "{host}" = {{
+      name = "${{google_compute_instance.{host_safe}.name}}"
+      internal_ip = "${{google_compute_instance.{host_safe}.network_interface[0].network_ip}}"
+      machine_type = "${{google_compute_instance.{host_safe}.machine_type}}"
+      zone = "${{google_compute_instance.{host_safe}.zone}}"
+      status = "${{google_compute_instance.{host_safe}.current_status}}"
+    }}
+""")
+            
+            f.write(f"""    "custom-vm" = {{
+      name = "${{google_compute_instance.custom_vm.name}}"
+      internal_ip = "${{google_compute_instance.custom_vm.network_interface[0].network_ip}}"
+      machine_type = "${{google_compute_instance.custom_vm.machine_type}}"
+      zone = "${{google_compute_instance.custom_vm.zone}}"
+      status = "${{google_compute_instance.custom_vm.current_status}}"
+    }}
+  }}
+  description = "Dettagli completi delle VM create nella subnet backend"
+}}
+
+output "firewall_rules_created" {{
+  value = [
+""")
+            
+            # Lista delle regole firewall create
+            fw_rules = ["allow-ssh-autonetgen-generated", "allow-internal-autonetgen-generated"]
+            for host in host_roles:
+                host_safe = self.sanitize_tag_name(host)
+                # Aggiungi eventuali regole specifiche per questo host
+                # (il numero dipende dalle porte utilizzate)
+            
+            for rule in fw_rules:
+                f.write(f'    "{rule}",\n')
+            
+            f.write(f"""
+  ]
+  description = "Lista delle regole firewall create per le risorse AutoNetGen"
+}}
+
+output "network_configuration" {{
+  value = {{
+    vpc_network_self_link = data.google_compute_network.existing_vpc.self_link
+    backend_subnet_self_link = data.google_compute_subnetwork.existing_backend_subnet.self_link
+    subnet_gateway_address = data.google_compute_subnetwork.existing_backend_subnet.gateway_address
+    subnet_ip_cidr_range = data.google_compute_subnetwork.existing_backend_subnet.ip_cidr_range
+  }}
+  description = "Configurazione di rete utilizzata per il deployment"
+}}
+
+# Output per debugging e monitoraggio
+output "ssh_connection_examples" {{
+  value = {{
+""")
+            
+            for host in host_roles:
+                host_safe = self.sanitize_tag_name(host)
+                f.write(f'    "{host}" = "gcloud compute ssh {host_safe} --zone={GCP_ZONE} --project={self.project_id}"\n')
+            
+            f.write(f"""    "custom-vm" = "gcloud compute ssh autonetgen-custom-vm --zone={GCP_ZONE} --project={self.project_id}"
+  }}
+  description = "Comandi per connettersi alle VM create (richiede gcloud CLI configurato)"
+}}
 """)
         
         logger.info(f"Configurazione Terraform generata in {output_dir}")
+        logger.info(f"Le VM saranno create nella subnet esistente: {self.backend_subnet_name} ({self.backend_subnet_cidr})")
+        logger.info("Le VM non avranno IP pubblici - accesso tramite Cloud NAT")
+        
         return output_dir
