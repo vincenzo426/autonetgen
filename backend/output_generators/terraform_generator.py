@@ -14,16 +14,46 @@ class TerraformGenerator(OutputGenerator):
     def __init__(self):
         """Inizializza il generatore leggendo la configurazione di rete esistente"""
         # Leggi configurazione di rete dalle variabili di ambiente
-        self.vpc_network_name = os.getenv('VPC_NETWORK_NAME', 'autonetgen-vpc')
-        self.backend_subnet_name = os.getenv('BACKEND_SUBNET_NAME', 'autonetgen-backend-subnet')
-        self.backend_subnet_cidr = os.getenv('BACKEND_SUBNET_CIDR', '10.2.0.0/24')
-        self.project_id = os.getenv('GOOGLE_CLOUD_PROJECT', GCP_PROJECT_ID)
+        self.vpc_network_name = os.environ.get('VPC_NETWORK_NAME', 'autonetgen-vpc')
+        self.backend_subnet_name = os.environ.get('BACKEND_SUBNET_NAME', 'autonetgen-backend-subnet')
+        self.backend_subnet_cidr = os.environ.get('BACKEND_SUBNET_CIDR', '10.2.0.0/24')
+        self.project_id = os.environ.get('GOOGLE_CLOUD_PROJECT', GCP_PROJECT_ID)
         
         logger.info(f"TerraformGenerator configurato per:")
         logger.info(f"  - VPC: {self.vpc_network_name}")
         logger.info(f"  - Subnet: {self.backend_subnet_name}")
         logger.info(f"  - CIDR: {self.backend_subnet_cidr}")
         logger.info(f"  - Project: {self.project_id}")
+
+    def validate_network_config(self):
+        """Valida la configurazione di rete prima della generazione"""
+        errors = []
+        warnings = []
+        
+        if not self.vpc_network_name:
+            errors.append("VPC_NETWORK_NAME non specificato")
+        
+        if not self.backend_subnet_name:
+            errors.append("BACKEND_SUBNET_NAME non specificato")
+            
+        if not self.backend_subnet_cidr:
+            warnings.append("BACKEND_SUBNET_CIDR non specificato, usando default")
+            
+        if not self.project_id:
+            errors.append("GOOGLE_CLOUD_PROJECT non specificato")
+            
+        # Log warnings e errors
+        for warning in warnings:
+            logger.warning(f"Configurazione di rete: {warning}")
+            
+        for error in errors:
+            logger.error(f"Configurazione di rete: {error}")
+            
+        if errors:
+            raise ValueError(f"Errori di configurazione di rete: {', '.join(errors)}")
+            
+        logger.info("✅ Configurazione di rete validata correttamente")
+        return True
 
     def sanitize_tag_name(self, ip):
         """Sanitizza un indirizzo IP per renderlo un tag valido"""
@@ -45,6 +75,9 @@ class TerraformGenerator(OutputGenerator):
         """
         logger.info(f"Generazione della configurazione Terraform in {output_dir}")
         logger.info(f"Utilizzo infrastruttura esistente: VPC {self.vpc_network_name}, Subnet {self.backend_subnet_name}")
+        
+        # Valida la configurazione prima di procedere
+        self.validate_network_config()
         
         # Estrai i dati necessari
         network_graph = data['network_graph']
@@ -80,13 +113,14 @@ terraform {{
             f.write(f"""
 # === RIFERIMENTI ALL'INFRASTRUTTURA ESISTENTE ===
 # Queste risorse esistono già e vengono solo referenziate
+# IMPORTANTE: Si usa self_link invece di name per evitare errori di riferimento
 
 # Riferimento alla VPC esistente
 data "google_compute_network" "existing_vpc" {{
   name = "{self.vpc_network_name}"
 }}
 
-# Riferimento alla subnet backend esistente
+# Riferimento alla subnet backend esistente  
 data "google_compute_subnetwork" "existing_backend_subnet" {{
   name   = "{self.backend_subnet_name}"
   region = "{GCP_REGION}"
@@ -275,9 +309,9 @@ resource "google_compute_instance" "{host_safe}" {{
   }}
 
   network_interface {{
-    # Utilizzo della VPC e subnet esistenti
-    network    = data.google_compute_network.existing_vpc.name
-    subnetwork = data.google_compute_subnetwork.existing_backend_subnet.name
+    # IMPORTANTE: Per VPC custom, specificare sia network che subnetwork
+    network    = data.google_compute_network.existing_vpc.self_link
+    subnetwork = data.google_compute_subnetwork.existing_backend_subnet.self_link
     
     # IMPORTANTE: Nessun access_config = nessun IP pubblico
     # Accesso internet tramite Cloud NAT configurato nell'infrastruttura principale
@@ -324,9 +358,9 @@ resource "google_compute_instance" "custom_vm" {{
   }}
 
   network_interface {{
-    # Utilizzo della VPC e subnet esistenti
-    network    = data.google_compute_network.existing_vpc.name
-    subnetwork = data.google_compute_subnetwork.existing_backend_subnet.name
+    # IMPORTANTE: Per VPC custom, specificare sia network che subnetwork con self_link
+    network    = data.google_compute_network.existing_vpc.self_link
+    subnetwork = data.google_compute_subnetwork.existing_backend_subnet.self_link
     
     # Nessun IP pubblico - accesso tramite Cloud NAT
   }}
@@ -464,5 +498,6 @@ output "ssh_connection_examples" {{
         logger.info(f"Configurazione Terraform generata in {output_dir}")
         logger.info(f"Le VM saranno create nella subnet esistente: {self.backend_subnet_name} ({self.backend_subnet_cidr})")
         logger.info("Le VM non avranno IP pubblici - accesso tramite Cloud NAT")
+        logger.info("IMPORTANTE: Usato self_link per network/subnetwork per evitare errori di riferimento")
         
         return output_dir
