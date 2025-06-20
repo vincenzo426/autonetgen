@@ -107,7 +107,7 @@ class TrafficTestManager:
             mapping_path = os.path.join(temp_dir, "ip_mapping.json")
             
             if self.gcs_manager.file_exists(mapping_blob):
-                self.gcs_manager.download_file(mapping_blob, mapping_path)
+                self.gcs_manager.download_file_to_memory(mapping_blob)
                 logger.info(f"Downloaded IP mapping: {mapping_path}")
             else:
                 logger.warning("IP mapping file not found, test may not work correctly")
@@ -121,7 +121,7 @@ class TrafficTestManager:
                 pcap_path = os.path.join(temp_dir, pcap_file)
                 
                 if self.gcs_manager.file_exists(pcap_blob):
-                    self.gcs_manager.download_file(pcap_blob, pcap_path)
+                    self.gcs_manager.download_file_to_memory(pcap_blob)
                     logger.info(f"Downloaded PCAP file: {pcap_path}")
                 else:
                     raise Exception(f"PCAP file {pcap_file} not found in GCS")
