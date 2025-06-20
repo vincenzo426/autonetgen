@@ -10,7 +10,7 @@ frontend_image_url = "gcr.io/gruppo-10/autonetgen-frontend:latest"
 backend_image_url  = "gcr.io/gruppo-10/autonetgen-backend:latest"
 
 # === CONFIGURAZIONE REGIONALE ===
-region = "europe-west1"  # Amsterdam (economica per Europa)
+region = "us-central1"  # Amsterdam (economica per Europa)
 
 # === CONFIGURAZIONE AMBIENTE ===
 environment = "dev"
