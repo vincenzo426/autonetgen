@@ -117,7 +117,7 @@ class TrafficTestManager:
                 pcap_file = self._find_pcap_file()
             
             if pcap_file:
-                pcap_blob = f"processes/{self.session_id}/{pcap_file}"
+                pcap_blob = f"processed/{self.session_id}/{pcap_file}"
                 pcap_path = os.path.join(temp_dir, pcap_file)
                 
                 if self.gcs_manager.file_exists(pcap_blob):
