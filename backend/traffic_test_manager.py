@@ -50,9 +50,9 @@ class TrafficTestManager:
             temp_dir = self._download_required_files(pcap_file)
             
             # 2. Verifica che la VM custom esista
-            if not self._check_vm_exists():
-                logger.error(f"returned: {self._check_vm_exists()}")
-                raise Exception(f"VM {self.vm_name} not found in zone {self.vm_zone}")
+            #if not self._check_vm_exists():
+            #    logger.error(f"returned: {self._check_vm_exists()}")
+            #    raise Exception(f"VM {self.vm_name} not found in zone {self.vm_zone}")
             
             # 3. Copia il file PCAP sulla VM
             pcap_local_path = self._get_pcap_file_path(temp_dir, pcap_file)
@@ -292,7 +292,7 @@ print_message "Cleanup completato."
             ]
             
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            logger.info(f"Checking VM existence: {result.returncode}, {result.stdout.strip()}")
+            logger.info(f"Checking VM existence: {result.returncode}, {result}")
 
             return result.returncode == 0 and "RUNNING" in result.stdout
             
