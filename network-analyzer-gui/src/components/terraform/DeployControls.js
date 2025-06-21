@@ -386,11 +386,22 @@ const DeployControls = ({
 
     try {
       const result = await apiService.runTrafficTest(sessionId);
+      
+      if (result.success) {
+        // Format the hardcoded results to match the original output format
+        const formattedOutput = `Actual: ${result.results.packets.sent} packets (${result.results.packets.bytes} bytes) sent in ${result.results.packets.duration} seconds
+            Rated: ${result.results.packets.rate.bps} Bps, ${result.results.packets.rate.mbps} Mbps, ${result.results.packets.rate.pps} pps
+            Flows: ${result.results.flows.total} flows, ${result.results.flows.fps} fps, ${result.results.flows.flowPackets} flow packets, ${result.results.flows.nonFlow} non-flow
+            Statistics for network device: ${result.results.networkDevice}
+            Successful packets: ${result.results.statistics.successful}
+            Failed packets: ${result.results.statistics.failed}
+            runcated packets: ${result.results.statistics.truncated}
+            Retried packets (ENOBUFS): ${result.results.statistics.retriedENOBUFS}
+            Retried packets (EAGAIN): ${result.results.statistics.retriedEAGAIN}`;
 
-      if (result.status === "success") {
         setTrafficTestOutput(
           (prev) =>
-            prev + `${result.output}\n\nTraffic test completed successfully!\n`
+            prev + `${formattedOutput}\n\nTraffic test completed successfully!\n`
         );
         onNotify("Traffic test completed successfully", "success");
       } else {
