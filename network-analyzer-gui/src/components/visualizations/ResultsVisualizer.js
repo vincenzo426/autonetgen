@@ -53,10 +53,9 @@ const ResultsVisualizer = ({ results, onExportClick }) => {
     output_paths: results.output_paths || {},
   };
 
-  // Array di tabs disponibili
+  // Array di tabs disponibili (rimossa la tab "roles")
   const tabs = [
     { id: "overview", label: "Overview" },
-    { id: "roles", label: "Host Roles" },
     { id: "subnets", label: "Subnets" },
   ];
 
@@ -81,8 +80,6 @@ const ResultsVisualizer = ({ results, onExportClick }) => {
         {activeTab === "overview" && (
           <OverviewTab data={processedResults} onExportClick={onExportClick} />
         )}
-
-        {activeTab === "roles" && <RolesTab data={processedResults} />}
 
         {activeTab === "subnets" && <SubnetsTab data={processedResults} />}
       </div>
@@ -130,8 +127,8 @@ const OverviewTab = ({ data, onExportClick }) => {
 
   return (
     <div>
-      {/* Card di statistiche */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+      {/* Card di statistiche - centrate dinamicamente per 2 card */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         {statCards.map((card, index) => (
           <StatCard key={index} data={card} />
         ))}
@@ -156,6 +153,15 @@ const OverviewTab = ({ data, onExportClick }) => {
         </div>
       </div>
 
+      {/* Host Roles Distribution - aggiunta dall'ex tab roles */}
+      <div className="bg-white p-6 rounded-lg border border-gray-200 mb-6">
+        <h3 className="text-lg font-semibold mb-4 flex items-center">
+          <PieChart size={20} className="text-gray-500 mr-2" />
+          Host Roles Distribution
+        </h3>
+        <RoleDistributionView roles={data.roles} />
+      </div>
+
       {/* Bottone esportazione */}
       <div className="flex justify-end">
         <button
@@ -166,21 +172,6 @@ const OverviewTab = ({ data, onExportClick }) => {
           Export Full Analysis
         </button>
       </div>
-    </div>
-  );
-};
-
-/**
- * Componente per la scheda Host Roles
- */
-const RolesTab = ({ data }) => {
-  return (
-    <div>
-      <h3 className="text-lg font-semibold mb-4 flex items-center">
-        <PieChart size={20} className="text-gray-500 mr-2" />
-        Host Roles Distribution
-      </h3>
-      <RoleDistributionView roles={data.roles} />
     </div>
   );
 };
