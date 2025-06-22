@@ -217,7 +217,7 @@ resource "google_cloud_run_service" "backend" {
     spec {
       service_account_name = google_service_account.autonetgen_sa.email
       # Configurazione economica
-      container_concurrency = 2
+      container_concurrency = 10
 
       timeout_seconds = 360
 
@@ -351,6 +351,7 @@ resource "google_cloud_run_service" "frontend" {
   template {
     spec {
       service_account_name = google_service_account.frontend_sa.email
+      container_concurrency = 10
       timeout_seconds = 3600  
       containers {
         image = var.frontend_image_url
@@ -382,7 +383,7 @@ resource "google_cloud_run_service" "frontend" {
     metadata {
       annotations = {
         "autoscaling.knative.dev/minScale" = "0"
-        "autoscaling.knative.dev/maxScale" = "2"
+        "autoscaling.knative.dev/maxScale" = tostring(var.max_instances)
         "run.googleapis.com/execution-environment" = "gen2"
         # NOTA: Frontend senza VPC connector - modalità standard Cloud Run
       }
