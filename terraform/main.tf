@@ -219,7 +219,7 @@ resource "google_cloud_run_service" "backend" {
       # Configurazione economica
       container_concurrency = 80
 
-      timeout_seconds = 360
+      timeout_seconds = 3600
 
       containers {
         image = var.backend_image_url
