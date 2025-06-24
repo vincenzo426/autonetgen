@@ -1,6 +1,6 @@
 # AutoNetGen - Generatore Automatico di Infrastrutture di Rete
 
-![AutoNetGen Architecture](logoAutonetGen.png)
+![AutoNetGen Architecture](./immagini/logoAutonetGen.png)
 
 *Piattaforma avanzata per l'analisi automatica del traffico di rete e generazione di infrastrutture cloud*
 
@@ -69,12 +69,12 @@
 
 Il progetto segue un'architettura a microservizi con separazione netta tra backend e frontend:
 
-![AutoNetGen Architecture](architetturaProgetto.png)
+![AutoNetGen Architecture](./immagini/architetturaProgetto.png)
 
 ---
 
 ## Backend - Componenti Principali
-![AutoNetGen backend](backendDiagramma.png)
+![AutoNetGen backend](./immagini/backendDiagramma.png)
 ### 3.1. Network Analyzer
 
 Il **Network Analyzer** è il componente core responsabile dell'analisi del traffico di rete e dell'estrazione di informazioni topologiche.
