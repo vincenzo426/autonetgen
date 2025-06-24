@@ -185,55 +185,5 @@ class NetworkEnricher:
         except Exception as e:
             logger.warning(f"Errore nell'analisi delle subnet: {e}")
             return {}
-    
-    def load_external_data(self, file_path):
-        """
-        Carica dati di arricchimento da un file esterno
-        
-        Args:
-            file_path (str): Percorso del file da caricare
+
             
-        Returns:
-            bool: True se il caricamento è riuscito, False altrimenti
-        """
-        try:
-            with open(file_path, 'r') as f:
-                data = json.load(f)
-                
-                if 'host_roles' in data:
-                    self.host_data.update(data['host_roles'])
-                    
-                if 'subnets' in data:
-                    self.subnet_data.update(data['subnets'])
-                    
-                return True
-                
-        except Exception as e:
-            logger.error(f"Errore nel caricamento del file di arricchimento: {e}")
-            return False
-            
-    def save_enrichment_data(self, file_path):
-        """
-        Salva i dati di arricchimento su un file
-        
-        Args:
-            file_path (str): Percorso del file in cui salvare i dati
-            
-        Returns:
-            bool: True se il salvataggio è riuscito, False altrimenti
-        """
-        try:
-            data = {
-                'host_roles': self.host_data,
-                'subnets': self.subnet_data
-            }
-            
-            with open(file_path, 'w') as f:
-                json.dump(data, f, indent=2)
-                
-            logger.info(f"Dati di arricchimento salvati in {file_path}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Errore nel salvataggio dei dati di arricchimento: {e}")
-            return False
