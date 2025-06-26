@@ -334,19 +334,15 @@ Le configurazioni Terraform sono organizzate in moduli per massimizzare la riusa
 - Versioning e requirements del provider
 - Configurazione dell'autenticazione
 
-**network.tf**
+**main.tf**
 - VPC network principale con subnet dedicate
 - Configurazione di firewall rules granulari
 - NAT gateway per connettività outbound
 - Load balancer con SSL/TLS termination
-
-**cloud-run.tf**
 - Servizi Cloud Run per backend e frontend
 - Configurazione di auto-scaling e resource limits
 - Service accounts con IAM roles minimali
 - Traffic allocation per blue-green deployment
-
-**storage.tf**
 - Bucket Cloud Storage per archiviazione file
 - Lifecycle policies per gestione automatica
 - IAM bindings per accesso controlled
